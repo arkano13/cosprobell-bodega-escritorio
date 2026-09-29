@@ -1,0 +1,59 @@
+# Arma el instalador de Windows en una máquina Windows de GitHub, lo prueba y lo deja para descargar.
+# Con una etiqueta vX.Y.Z (por ejemplo v1.0.1) además publica la versión en "Releases".
+name: Instalador de Windows
+
+on:
+  push:
+    branches: [main, "claude/**"]
+    tags: ["v*"]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  windows:
+    runs-on: windows-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - run: npm test
+      - name: Armar instalador
+        run: npm run dist
+        env:
+          # Sin certificado de firma de código: el instalador sale sin firmar.
+          CSC_IDENTITY_AUTO_DISCOVERY: "false"
+      - name: Prueba rápida del programa armado
+        run: node test/humo.mjs "dist/win-unpacked/Bodega Cosprobell.exe"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: instalador-windows
+          path: dist/*.exe
+          if-no-files-found: error
+          retention-days: 30
+
+  publicar:
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: windows
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: instalador-windows
+          path: dist
+      # Sirve igual si la versión se creó desde "Releases" en GitHub o solo con la etiqueta.
+      - name: Publicar versión
+        run: |
+          gh release view "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" > /dev/null 2>&1 \
+            || gh release create "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" --title "Bodega Cosprobell $GITHUB_REF_NAME" --generate-notes
+          gh release upload "$GITHUB_REF_NAME" dist/*.exe --repo "$GITHUB_REPOSITORY" --clobber
+        env:
+          GH_TOKEN: ${{ github.token }}

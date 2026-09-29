@@ -1,0 +1,75 @@
+{
+  "name": "cosprobell-bodega-escritorio",
+  "productName": "Bodega Cosprobell",
+  "version": "1.0.0",
+  "description": "App de escritorio para Windows de la pantalla de bodega de Cosprobell",
+  "author": "Cosprobell",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/arkano13/cosprobell-bodega-escritorio.git"
+  },
+  "private": true,
+  "type": "module",
+  "main": "src/main.js",
+  "scripts": {
+    "start": "electron .",
+    "test": "node --test test/*.test.js",
+    "dist": "electron-builder --win nsis --x64 --publish never",
+    "dist:carpeta": "electron-builder --dir --publish never"
+  },
+  "devDependencies": {
+    "electron": "44.4.5",
+    "electron-builder": "26.15.3",
+    "playwright-core": "1.63.0"
+  },
+  "build": {
+    "appId": "com.cosprobell.bodega",
+    "productName": "Bodega Cosprobell",
+    "copyright": "Cosprobell",
+    "directories": {
+      "output": "dist",
+      "buildResources": "build"
+    },
+    "files": [
+      "src/**",
+      "ui/**",
+      "build/icon.png",
+      "package.json"
+    ],
+    "asar": true,
+    "electronFuses": {
+      "runAsNode": false,
+      "enableCookieEncryption": true,
+      "enableNodeOptionsEnvironmentVariable": false,
+      "enableNodeCliInspectArguments": false,
+      "onlyLoadAppFromAsar": true
+    },
+    "win": {
+      "target": [
+        "nsis"
+      ],
+      "icon": "build/icon.png"
+    },
+    "nsis": {
+      "oneClick": true,
+      "perMachine": false,
+      "runAfterFinish": true,
+      "createDesktopShortcut": "always",
+      "createStartMenuShortcut": true,
+      "shortcutName": "Bodega Cosprobell",
+      "deleteAppDataOnUninstall": false,
+      "installerLanguages": [
+        "es_ES"
+      ],
+      "language": "3082",
+      "artifactName": "Bodega-Cosprobell-${version}-instalador.${ext}"
+    },
+    "linux": {
+      "target": [
+        "dir"
+      ],
+      "icon": "build/icon.png",
+      "category": "Office"
+    }
+  }
+}
