@@ -13,7 +13,7 @@ test("uuid: formato v4 válido para operacionId y distinto en cada lectura", () 
   assert.notEqual(a, b);
 });
 
-test("api: envía la clave, arma rutas y normaliza los dos formatos de error", async () => {
+test("api: envía la sesión del operador, arma rutas y normaliza los dos formatos de error", async () => {
   const pedidos = [];
   const respuestas = [
     Response.json({ data: [], siguienteCursor: null }),
@@ -21,10 +21,11 @@ test("api: envía la clave, arma rutas y normaliza los dos formatos de error", a
     Response.json({ error: { code: "PEDIDO_NO_ENCONTRADO", message: "Pedido no encontrado" } }, { status: 404 }),
     new Response("sin json", { status: 503 }),
   ];
-  const api = crearApi({ clave: "clave-equipo", fetchImpl: async (url, opciones) => { pedidos.push([url, opciones]); return respuestas.shift(); } });
+  const api = crearApi({ token: "token-sesion", fetchImpl: async (url, opciones) => { pedidos.push([url, opciones]); return respuestas.shift(); } });
   await api.pedidos(15);
   assert.equal(pedidos[0][0], "/pedidos?estado=abiertos&limit=25&cursor=15");
-  assert.equal(pedidos[0][1].headers["X-API-Key"], "clave-equipo");
+  assert.equal(pedidos[0][1].headers.Authorization, "Bearer token-sesion");
+  assert.equal(pedidos[0][1].headers["X-API-Key"], undefined);
   await assert.rejects(api.escanear(7, "740", "uuid"), (e) => e instanceof ErrorApi && e.status === 409 && e.mensaje === "Ese producto no pertenece a este pedido" && !e.temporal);
   assert.deepEqual(JSON.parse(pedidos[1][1].body), { codigo: "740", operacionId: "uuid" });
   await assert.rejects(api.pedido(9), (e) => e.codigo === "PEDIDO_NO_ENCONTRADO" && e.mensaje === "Pedido no encontrado");
@@ -32,9 +33,9 @@ test("api: envía la clave, arma rutas y normaliza los dos formatos de error", a
 });
 
 test("api: sin red o sin respuesta a tiempo es un error temporal", async () => {
-  const sinRed = crearApi({ clave: "x", fetchImpl: async () => { throw new TypeError("fetch failed"); } });
+  const sinRed = crearApi({ token: "x", fetchImpl: async () => { throw new TypeError("fetch failed"); } });
   await assert.rejects(sinRed.pedidos(), (e) => e.temporal === true && e.status === 0);
-  const lenta = crearApi({ clave: "x", tiempoMs: 20, fetchImpl: (_url, { signal }) => new Promise((_r, rechazar) => signal.addEventListener("abort", () => rechazar(new Error("abortado")))) });
+  const lenta = crearApi({ token: "x", tiempoMs: 20, fetchImpl: (_url, { signal }) => new Promise((_r, rechazar) => signal.addEventListener("abort", () => rechazar(new Error("abortado")))) });
   await assert.rejects(lenta.pedidos(), (e) => e.temporal === true);
 });
 
@@ -87,30 +88,24 @@ test("cola: sin conexión persistente se detiene, guarda las lecturas y las rean
   assert.deepEqual(guardado, []);
 });
 
-test("cola: una clave rechazada detiene la cola sin perder la lectura", async () => {
-  const cola = crearColaLecturas({ esperar: sinEspera, enviar: async () => { throw new ErrorApi({ status: 401, mensaje: "clave" }); } });
+test("cola: una sesión vencida detiene la cola sin perder la lectura", async () => {
+  const cola = crearColaLecturas({ esperar: sinEspera, enviar: async () => { throw new ErrorApi({ status: 401, mensaje: "sesión vencida" }); } });
   cola.agregar("A");
   await cola.procesar();
   assert.equal(cola.detenida, true);
   assert.equal(cola.pendientes, 1);
 });
 
-test("servidor: exige HTTPS salvo en este mismo equipo y guarda solo el origen", async () => {
-  const { normalizarServidor } = await import("../ui/js/servidor.js");
-  assert.deepEqual(normalizarServidor("https://bodega.ejemplo.com/bodega/"), { servidor: "https://bodega.ejemplo.com" });
-  assert.deepEqual(normalizarServidor("  bodega.ejemplo.com  "), { servidor: "https://bodega.ejemplo.com" });
-  assert.deepEqual(normalizarServidor("http://127.0.0.1:3000"), { servidor: "http://127.0.0.1:3000" });
-  assert.deepEqual(normalizarServidor("http://localhost:3000/x"), { servidor: "http://localhost:3000" });
-  assert.match(normalizarServidor("http://bodega.ejemplo.com").error, /https/);
-  assert.match(normalizarServidor("").error, /Escribí/);
-  assert.match(normalizarServidor("ftp://bodega.ejemplo.com").error, /https/);
-  assert.match(normalizarServidor("https://usuario:clave@bodega.ejemplo.com").error, /usuario/);
-  assert.match(normalizarServidor("https://").error, /no es válida/);
-});
-
 test("api: usa la dirección del servidor como base", async () => {
   const urls = [];
-  const api = crearApi({ clave: "k", base: "https://bodega.ejemplo.com", fetchImpl: async (url) => { urls.push(url); return Response.json({ data: [], siguienteCursor: null }); } });
+  const envios = [];
+  const api = crearApi({ token: "t", base: "https://bodega.ejemplo.com", fetchImpl: async (url, opciones) => {
+    urls.push(url); envios.push(opciones); return Response.json({ data: [], siguienteCursor: null }); } });
   await api.pedidos();
   assert.equal(urls[0], "https://bodega.ejemplo.com/pedidos?estado=abiertos&limit=25");
+  // Al iniciar una preparación no se manda el preparador: lo pone el servidor desde la sesión.
+  await api.iniciar(9);
+  assert.deepEqual(JSON.parse(envios[1].body), { pedidoDocEntry: 9 });
+  await api.cerrarSesion();
+  assert.deepEqual([urls[2], envios[2].method], ["https://bodega.ejemplo.com/ingreso/sesion", "DELETE"]);
 });

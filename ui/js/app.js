@@ -1,7 +1,6 @@
 import { crearApi } from "./api.js";
 import { crearColaLecturas } from "./lecturas.js";
 import { icono } from "./iconos.js";
-import { normalizarServidor } from "./servidor.js";
 
 // ---------------------------------------------------------------------------
 // Utilidades
@@ -73,13 +72,18 @@ function sonar(tipo) {
 // Estado de la pantalla
 // ---------------------------------------------------------------------------
 
+// La versión 1.0.0 guardaba dirección, clave y nombre en el equipo: ya no se usan.
+for (const viejo of ["clave", "servidor", "operador"]) guardado.borrar(viejo);
+
+// La dirección del servidor la fija la app; la sesión es la del operador que ingresó con su PIN.
+const preferencias = await window.escritorio?.obtenerPreferencias().catch(() => null);
 const estado = {
-  clave: guardado.leer("clave"),
-  servidor: guardado.leer("servidor"),
-  operador: guardado.leer("operador") ?? "",
+  servidor: preferencias?.servidor ?? null,
+  ingreso: guardado.leer("ingreso"), // { token, expiraEn, operador: { id, nombre } }
   sesion: guardado.leer("sesion"), // { pickingId, docEntry, docNum }
 };
-let api = estado.clave && estado.servidor ? crearApi({ clave: estado.clave, base: estado.servidor }) : null;
+const ingresoVigente = (ingreso) => Boolean(ingreso?.token && Date.parse(ingreso.expiraEn) > Date.now());
+let api = estado.servidor && ingresoVigente(estado.ingreso) ? crearApi({ token: estado.ingreso.token, base: estado.servidor }) : null;
 let limpiezas = [];
 // Una sola cola de lecturas por preparación, aunque se salga y se vuelva a entrar a la pantalla de escaneo:
 // así las lecturas pendientes no se envían desde dos colas a la vez.
@@ -140,13 +144,25 @@ function guardarSesion(sesion) {
 
 function actualizarBarra() {
   const operador = document.getElementById("operador");
-  operador.hidden = !estado.operador;
-  operador.replaceChildren(...(estado.operador ? [icono("operador"), h("span", {}, `Operador: ${estado.operador}`)] : []));
+  const nombre = api ? estado.ingreso?.operador?.nombre : null;
+  operador.hidden = !nombre;
+  operador.replaceChildren(...(nombre ? [icono("operador"), h("span", {}, `Operador: ${nombre}`)] : []));
 }
 
-// Error al cargar una vista: la clave inválida lleva a configurar el equipo; el resto ofrece reintentar.
+// Termina la sesión en este equipo. Las lecturas pendientes quedan guardadas y se envían al volver a ingresar.
+function olvidarIngreso() {
+  estado.ingreso = null;
+  guardado.borrar("ingreso");
+  api = null;
+  actualizarBarra();
+}
+
+// Error al cargar una vista: la sesión vencida lleva al ingreso; el resto ofrece reintentar.
 function mostrarError(error, reintentar) {
-  if (error?.status === 401) return vistaConfiguracion("La clave de este equipo no es válida o fue desactivada.");
+  if (error?.status === 401) {
+    olvidarIngreso();
+    return vistaIngreso("Tu sesión terminó. Volvé a ingresar con tu PIN.");
+  }
   return mostrar(h("div", { class: "tarjeta" },
     aviso("error", error?.mensaje ?? "Ocurrió un error inesperado", { role: "alert" }),
     h("div", { class: "fila" },
@@ -169,67 +185,147 @@ function confirmar({ titulo, texto, aceptar = "Aceptar", peligro = false }) {
 }
 
 // ---------------------------------------------------------------------------
-// Configuración del equipo
+// Ingreso con nombre y PIN
 // ---------------------------------------------------------------------------
 
-function vistaConfiguracion(mensaje = "") {
-  const servidor = h("input", { id: "cfg-servidor", type: "url", inputmode: "url", autocomplete: "url", spellcheck: "false",
-    placeholder: "https://nombre.up.railway.app", required: true, "aria-describedby": "cfg-servidor-ayuda" });
-  servidor.value = estado.servidor ?? "";
-  const clave = h("input", { id: "cfg-clave", type: "password", autocomplete: "off", required: true });
-  const operador = h("input", { id: "cfg-operador", type: "text", autocomplete: "name", maxlength: "60" });
-  operador.value = estado.operador;
-  const error = aviso("error", mensaje, { role: "alert", hidden: !mensaje });
-  const guardar = h("button", { class: "boton boton--principal boton--ancho boton--grande", type: "submit" }, "Guardar y continuar");
+function mensajeIngreso(respuesta) {
+  if (respuesta.status === 0 && respuesta.codigo !== "SIN_CLAVE_INGRESO") return "Sin conexión con el servidor. Revisá la red y probá de nuevo.";
+  if (respuesta.codigo === "PIN_INCORRECTO") return "PIN incorrecto. Probá de nuevo.";
+  if (respuesta.status === 401 || respuesta.status === 403) {
+    return respuesta.codigo ? respuesta.mensaje : "Esta instalación no tiene una clave de ingreso válida. Avisá al supervisor.";
+  }
+  return respuesta.mensaje ?? "No se pudo ingresar";
+}
 
-  // Opciones de la app de escritorio: solo existen dentro de la app.
+async function vistaIngreso(mensaje = "") {
+  if (!window.escritorio) {
+    return mostrar(h("div", { class: "tarjeta" }, aviso("error", "Esta pantalla funciona solo dentro de la app Bodega Cosprobell.")));
+  }
+  mostrar(cargando("Cargando operadores…"));
+  const respuesta = await window.escritorio.operadores().catch(() => ({ ok: false, status: 0 }));
+  if (!respuesta.ok) {
+    return mostrar(h("section", { class: "tarjeta ingreso" },
+      aviso("error", mensajeIngreso(respuesta), { role: "alert" }),
+      boton("boton--principal", "actualizar", "Reintentar", { onclick: () => vistaIngreso(mensaje) })));
+  }
+  const operadores = respuesta.data ?? [];
+  mostrar(h("section", { class: "ingreso", "aria-labelledby": "titulo-ingreso" },
+    h("h1", { id: "titulo-ingreso" }, "¿Quién va a preparar?"),
+    h("p", { class: "ingreso__ayuda suave" }, "Tocá tu nombre y escribí tu PIN."),
+    mensaje && aviso("alerta", mensaje),
+    operadores.length === 0
+      ? aviso("alerta", "Todavía no hay operadores. Pedile al supervisor que te dé de alta.")
+      : h("ul", { class: "operadores" }, operadores.map((operador) => h("li", {},
+        h("button", { class: "operador", type: "button", onclick: () => vistaPin(operador) },
+          h("span", { class: "operador__inicial", "aria-hidden": "true" }, operador.nombre.trim().charAt(0).toUpperCase()),
+          h("span", { class: "operador__nombre" }, operador.nombre)))))));
+}
+
+function vistaPin(operador) {
+  let pin = "";
+  let enviando = false;
+  const puntos = h("div", { class: "pin__puntos", "aria-hidden": "true" }, [0, 1, 2, 3].map(() => h("span", {})));
+  const progreso = h("p", { class: "pin__progreso", "aria-live": "polite" });
+  const error = aviso("error", "", { role: "alert", hidden: true });
+  const teclas = [];
+  const tecla = (texto, accion, clase = "", etiqueta = null) => {
+    const b = h("button", { class: `pin__tecla ${clase}`.trim(), type: "button", "aria-label": etiqueta, onclick: accion }, texto);
+    teclas.push(b);
+    return b;
+  };
+
+  function pintar() {
+    [...puntos.children].forEach((punto, i) => punto.classList.toggle("lleno", i < pin.length));
+    progreso.textContent = pin.length ? `${pin.length} de 4 números` : "Escribí tu PIN de 4 números";
+    for (const b of teclas) b.disabled = enviando;
+  }
+  async function enviar() {
+    enviando = true; pintar();
+    const respuesta = await window.escritorio.ingresar(operador.id, pin).catch(() => ({ ok: false, status: 0 }));
+    if (respuesta.ok) {
+      estado.ingreso = respuesta.data;
+      guardado.escribir("ingreso", respuesta.data);
+      api = crearApi({ token: respuesta.data.token, base: estado.servidor });
+      actualizarBarra();
+      return estado.sesion ? vistaEscaneo() : vistaPedidos();
+    }
+    pin = ""; enviando = false;
+    textoAviso(error, mensajeIngreso(respuesta)); error.hidden = false;
+    pintar();
+    sonar("error");
+  }
+  function agregar(digito) {
+    if (enviando || pin.length >= 4) return;
+    pin += digito; error.hidden = true; pintar();
+    if (pin.length === 4) enviar();
+  }
+  function borrar() { if (!enviando) { pin = pin.slice(0, -1); pintar(); } }
+
+  mostrar(h("section", { class: "ingreso", "aria-labelledby": "titulo-pin" },
+    boton("boton--volver", "volver", "Otro nombre", { onclick: () => vistaIngreso() }),
+    h("div", { class: "tarjeta pin" },
+      h("span", { class: "rotulo" }, "Operador"),
+      h("h1", { id: "titulo-pin" }, operador.nombre),
+      h("p", { class: "pin__ayuda suave" }, icono("candado"), "Escribí tu PIN de 4 números"),
+      puntos, progreso, error,
+      h("div", { class: "pin__teclado" },
+        ["1", "2", "3", "4", "5", "6", "7", "8", "9"].map((d) => tecla(d, () => agregar(d))),
+        tecla("Limpiar", () => { if (!enviando) { pin = ""; pintar(); } }, "pin__tecla--texto"),
+        tecla("0", () => agregar("0")),
+        tecla(icono("borrar"), borrar, "pin__tecla--texto", "Borrar el último número")))));
+  // También se puede escribir con el teclado de la PC.
+  escuchar(document, "keydown", (evento) => {
+    if (dialogo.open || evento.ctrlKey || evento.altKey || evento.metaKey) return;
+    if (/^\d$/.test(evento.key)) { evento.preventDefault(); agregar(evento.key); }
+    else if (evento.key === "Backspace") { evento.preventDefault(); borrar(); }
+    else if (evento.key === "Escape") vistaIngreso();
+  });
+  pintar();
+}
+
+// ---------------------------------------------------------------------------
+// Menú: cambiar de operador y opciones del equipo
+// ---------------------------------------------------------------------------
+
+async function abrirMenu() {
   const escritorio = window.escritorio;
-  const inicioWindows = h("input", { id: "cfg-inicio", type: "checkbox" });
-  const pantallaCompleta = h("input", { id: "cfg-pantalla", type: "checkbox" });
+  const inicioWindows = h("input", { id: "menu-inicio", type: "checkbox" });
+  const pantallaCompleta = h("input", { id: "menu-pantalla", type: "checkbox" });
   const version = h("p", { class: "version" });
+  const guardarOpciones = () => escritorio?.guardarPreferencias({ iniciarConWindows: inicioWindows.checked, pantallaCompleta: pantallaCompleta.checked }).catch(() => {});
+  inicioWindows.addEventListener("change", guardarOpciones);
+  pantallaCompleta.addEventListener("change", guardarOpciones);
   escritorio?.obtenerPreferencias().then((p) => {
     inicioWindows.checked = p.iniciarConWindows;
     pantallaCompleta.checked = p.pantallaCompleta;
     version.textContent = `Bodega Cosprobell · versión ${p.version}`;
   }).catch(() => {});
 
-  const formulario = h("form", { class: "tarjeta formulario", onsubmit: async (evento) => {
-    evento.preventDefault();
-    guardar.disabled = true; error.hidden = true;
-    const mostrarProblema = (texto) => { textoAviso(error, texto); error.hidden = false; guardar.disabled = false; };
-    const direccion = normalizarServidor(servidor.value);
-    if (direccion.error) { mostrarProblema(direccion.error); servidor.focus(); return; }
-    servidor.value = direccion.servidor;
-    const prueba = crearApi({ clave: clave.value.trim(), base: direccion.servidor });
-    try {
-      await prueba.pedidos();
-    } catch (e) {
-      return mostrarProblema(e.status === 401 ? "La clave no es válida o está desactivada."
-        : e.status === 0 ? "No se pudo conectar con el servidor. Revisá la dirección y la conexión a la red."
-        : e.status === 404 ? "Esa dirección no corresponde al servidor de bodega."
-        : e.mensaje);
-    }
-    estado.servidor = direccion.servidor; estado.clave = clave.value.trim(); estado.operador = operador.value.trim();
-    guardado.escribir("servidor", estado.servidor); guardado.escribir("clave", estado.clave); guardado.escribir("operador", estado.operador);
-    await escritorio?.guardarPreferencias({ iniciarConWindows: inicioWindows.checked, pantallaCompleta: pantallaCompleta.checked }).catch(() => {});
-    api = prueba;
-    actualizarBarra();
-    vistaPedidos();
-  } },
-  h("h1", {}, "Configurar este equipo"),
-  h("p", { class: "suave" }, "La dirección y la clave las entrega el supervisor. Quedan guardadas solo en este equipo."),
-  error,
-  h("label", { for: "cfg-servidor" }, "Dirección del servidor"), servidor,
-  h("p", { id: "cfg-servidor-ayuda", class: "ayuda" }, "Empieza con https://"),
-  h("label", { for: "cfg-clave" }, "Clave del equipo"), clave,
-  h("label", { for: "cfg-operador" }, "Nombre de quien escanea"), operador,
-  escritorio && h("fieldset", { class: "opciones" }, h("legend", {}, "Este equipo"),
-    h("label", { class: "opcion", for: "cfg-inicio" }, inicioWindows, "Abrir la app al iniciar Windows"),
-    h("label", { class: "opcion", for: "cfg-pantalla" }, pantallaCompleta, "Pantalla completa (F11 para cambiar)")),
-  guardar,
-  escritorio && version);
-  mostrar(formulario);
-  (estado.servidor ? clave : servidor).focus();
+  const nombre = api ? estado.ingreso?.operador?.nombre : null;
+  dialogo.replaceChildren(
+    h("div", { class: "dialogo__cuerpo menu" },
+      h("h2", {}, "Menú"),
+      nombre && h("div", { class: "menu__operador" }, icono("operador"), h("div", {}, h("span", { class: "rotulo" }, "Operador"), h("strong", {}, nombre))),
+      nombre && boton("boton--ancho", "salir", "Cambiar de operador", { onclick: cambiarOperador }),
+      escritorio && h("fieldset", { class: "opciones" }, h("legend", {}, "Este equipo"),
+        h("label", { class: "opcion", for: "menu-inicio" }, inicioWindows, "Abrir la app al iniciar Windows"),
+        h("label", { class: "opcion", for: "menu-pantalla" }, pantallaCompleta, "Pantalla completa (F11 para cambiar)")),
+      escritorio && version),
+    h("div", { class: "dialogo__acciones" }, boton("", null, "Cerrar", { onclick: () => dialogo.close() })));
+  dialogo.onclose = null;
+  dialogo.showModal();
+}
+
+async function cambiarOperador() {
+  dialogo.close();
+  const pendientes = lecturas?.cola.pendientes ?? 0;
+  if (pendientes > 0 && !(await confirmar({ titulo: "Hay lecturas sin enviar",
+    texto: [`${pendientes} ${pendientes === 1 ? "lectura queda" : "lecturas quedan"} guardadas en este equipo y se enviarán cuando alguien vuelva a ingresar.`],
+    aceptar: "Cambiar de operador" }))) return;
+  // Cierra la sesión también en el servidor; si no hay red, vence sola al final del turno.
+  api?.cerrarSesion().catch(() => {});
+  olvidarIngreso();
+  vistaIngreso();
 }
 
 // ---------------------------------------------------------------------------
@@ -323,7 +419,7 @@ async function vistaPedido(docEntry) {
   empezar.addEventListener("click", async () => {
     empezar.disabled = true; problema.hidden = true;
     try {
-      const { data: sesion } = await api.iniciar(pedido.docEntry, estado.operador);
+      const { data: sesion } = await api.iniciar(pedido.docEntry);
       guardarSesion({ pickingId: sesion.id, docEntry: pedido.docEntry, docNum: pedido.docNum });
       vistaEscaneo();
     } catch (error) {
@@ -603,14 +699,8 @@ function vistaResumen(sesion, pedido) {
 // ---------------------------------------------------------------------------
 
 for (const lugar of document.querySelectorAll("[data-icono]")) lugar.replaceWith(icono(lugar.dataset.icono));
-document.getElementById("btn-inicio").addEventListener("click", () => (api ? vistaPedidos() : vistaConfiguracion()));
-document.getElementById("btn-menu").addEventListener("click", async () => {
-  const cambiar = await confirmar({ titulo: "Configuración del equipo",
-    texto: ["Podés cambiar la dirección del servidor, la clave de este equipo o el nombre de quien escanea.",
-      estado.sesion ? "La preparación abierta se conserva y se puede continuar después." : ""].filter(Boolean),
-    aceptar: "Cambiar configuración" });
-  if (cambiar) vistaConfiguracion();
-});
+document.getElementById("btn-inicio").addEventListener("click", () => (api ? vistaPedidos() : vistaIngreso()));
+document.getElementById("btn-menu").addEventListener("click", abrirMenu);
 const conexion = document.getElementById("estado-conexion");
 const pintarConexion = () => { conexion.hidden = navigator.onLine; };
 window.addEventListener("online", pintarConexion);
@@ -618,6 +708,6 @@ window.addEventListener("offline", pintarConexion);
 pintarConexion();
 actualizarBarra();
 
-if (!api) vistaConfiguracion();
+if (!api) vistaIngreso();
 else if (estado.sesion) vistaEscaneo();
 else vistaPedidos();

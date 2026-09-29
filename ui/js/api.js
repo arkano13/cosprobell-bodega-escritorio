@@ -13,7 +13,8 @@ export class ErrorApi extends Error {
 
 const TEMPORALES = [408, 429, 500, 502, 503, 504];
 
-export function crearApi({ clave, base = "", fetchImpl = (...args) => globalThis.fetch(...args), tiempoMs = 15000 }) {
+// token: la sesión del operador que ingresó con su PIN.
+export function crearApi({ token, base = "", fetchImpl = (...args) => globalThis.fetch(...args), tiempoMs = 15000 }) {
   async function pedir(metodo, ruta, cuerpo) {
     const control = new AbortController();
     const temporizador = setTimeout(() => control.abort(), tiempoMs);
@@ -21,7 +22,7 @@ export function crearApi({ clave, base = "", fetchImpl = (...args) => globalThis
     try {
       respuesta = await fetchImpl(`${base}${ruta}`, {
         method: metodo,
-        headers: { "X-API-Key": clave, ...(cuerpo === undefined ? {} : { "Content-Type": "application/json" }) },
+        headers: { Authorization: `Bearer ${token}`, ...(cuerpo === undefined ? {} : { "Content-Type": "application/json" }) },
         body: cuerpo === undefined ? undefined : JSON.stringify(cuerpo),
         signal: control.signal,
       });
@@ -45,10 +46,12 @@ export function crearApi({ clave, base = "", fetchImpl = (...args) => globalThis
   return {
     pedidos: (cursor = null) => pedir("GET", `/pedidos?estado=abiertos&limit=25${cursor === null ? "" : `&cursor=${cursor}`}`),
     pedido: (docEntry) => pedir("GET", `/pedidos/${docEntry}`),
-    iniciar: (pedidoDocEntry, usuarioId) => pedir("POST", "/picking", { pedidoDocEntry, ...(usuarioId ? { usuarioId } : {}) }),
+    // El preparador lo pone el servidor: es el operador de la sesión.
+    iniciar: (pedidoDocEntry) => pedir("POST", "/picking", { pedidoDocEntry }),
     sesion: (id) => pedir("GET", `/picking/${id}`),
     escanear: (id, codigo, operacionId) => pedir("POST", `/picking/${id}/escanear`, { codigo, operacionId }),
     escaneos: (id, despuesDe = null) => pedir("GET", `/picking/${id}/escaneos?limit=100${despuesDe === null ? "" : `&despuesDe=${despuesDe}`}`),
     finalizar: (id) => pedir("POST", `/picking/${id}/finalizar`),
+    cerrarSesion: () => pedir("DELETE", "/ingreso/sesion"),
   };
 }

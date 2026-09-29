@@ -1,7 +1,7 @@
 {
   "name": "cosprobell-bodega-escritorio",
   "productName": "Bodega Cosprobell",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "description": "App de escritorio para Windows de la pantalla de bodega de Cosprobell",
   "author": "Cosprobell",
   "repository": {
@@ -34,6 +34,7 @@
       "src/**",
       "ui/**",
       "build/icon.png",
+      "recursos/clave-ingreso.json",
       "package.json"
     ],
     "asar": true,
