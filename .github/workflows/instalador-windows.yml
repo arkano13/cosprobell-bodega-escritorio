@@ -24,6 +24,19 @@ jobs:
           cache: npm
       - run: npm ci
       - run: npm test
+      # La clave de solo ingreso viaja dentro de la app. Sin el secreto, la app arma igual pero no puede ingresar;
+      # para publicar una versión oficial (etiqueta vX.Y.Z) el secreto es obligatorio.
+      - name: Clave de ingreso
+        shell: bash
+        env:
+          CLAVE: ${{ secrets.BODEGA_CLAVE_INGRESO }}
+        run: |
+          if [ -z "$CLAVE" ]; then
+            if [[ "$GITHUB_REF" == refs/tags/* ]]; then echo "::error::Falta el secreto BODEGA_CLAVE_INGRESO"; exit 1; fi
+            echo "::warning::Falta el secreto BODEGA_CLAVE_INGRESO: esta versión no podrá ingresar"
+          fi
+          mkdir -p recursos
+          node -e 'require("fs").writeFileSync("recursos/clave-ingreso.json", JSON.stringify({ clave: process.env.CLAVE || null }))'
       - name: Armar instalador
         run: npm run dist
         env:

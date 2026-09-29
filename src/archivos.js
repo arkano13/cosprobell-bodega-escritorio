@@ -13,19 +13,20 @@ const TIPOS = {
   ".svg": "image/svg+xml",
 };
 
-// La pantalla solo ejecuta sus propios archivos y solo se conecta al servidor por HTTPS
-// (HTTP únicamente hacia este mismo equipo, para pruebas).
-export const POLITICA_CONTENIDO = [
-  "default-src 'none'",
-  "script-src 'self'",
-  "style-src 'self'",
-  "font-src 'self'",
-  "img-src 'self' data:",
-  "connect-src https: http://localhost:* http://127.0.0.1:*",
-  "base-uri 'none'",
-  "form-action 'none'",
-  "frame-ancestors 'none'",
-].join("; ");
+// La pantalla solo ejecuta sus propios archivos y solo se conecta al servidor de la app.
+export function politicaContenido(servidor) {
+  return [
+    "default-src 'none'",
+    "script-src 'self'",
+    "style-src 'self'",
+    "font-src 'self'",
+    "img-src 'self' data:",
+    `connect-src ${new URL(servidor).origin}`,
+    "base-uri 'none'",
+    "form-action 'none'",
+    "frame-ancestors 'none'",
+  ].join("; ");
+}
 
 // Devuelve la ruta del archivo pedido dentro de raiz, o null si no corresponde servirlo.
 export function resolverArchivo(raiz, direccion) {
@@ -43,10 +44,10 @@ export function resolverArchivo(raiz, direccion) {
   return archivo;
 }
 
-export function cabeceras(archivo) {
+export function cabeceras(archivo, servidor) {
   return {
     "Content-Type": TIPOS[path.extname(archivo).toLowerCase()],
-    "Content-Security-Policy": POLITICA_CONTENIDO,
+    "Content-Security-Policy": politicaContenido(servidor),
     "X-Content-Type-Options": "nosniff",
     "Cache-Control": "no-store",
   };

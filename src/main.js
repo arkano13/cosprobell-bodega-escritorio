@@ -1,11 +1,13 @@
 // Proceso principal de la app de escritorio: una sola ventana con la pantalla de bodega.
 // La página no accede a Node, no abre otras ventanas y no navega fuera de sus propios archivos.
-import { app, BrowserWindow, Menu, ipcMain, protocol, session } from "electron";
+import { app, BrowserWindow, Menu, ipcMain, net, protocol, session } from "electron";
 import { readFile } from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { ORIGEN, cabeceras, resolverArchivo } from "./archivos.js";
 import { crearPreferencias } from "./preferencias.js";
+import { elegirServidor } from "./servidor.js";
+import { crearIngreso, datosIngresoValidos, leerClaveIngreso } from "./ingreso.js";
 
 const RAIZ = path.join(path.dirname(fileURLToPath(import.meta.url)), "..");
 const UI = path.join(RAIZ, "ui");
@@ -19,6 +21,8 @@ protocol.registerSchemesAsPrivileged([
 
 let ventana = null;
 let preferencias = null;
+let servidor = null;
+let ingreso = null;
 
 app.on("web-contents-created", (_evento, contenido) => {
   const soloPropios = (evento, url) => { if (!url.startsWith(`${ORIGEN}/`)) evento.preventDefault(); };
@@ -41,8 +45,11 @@ if (!app.requestSingleInstanceLock()) {
   app.whenReady().then(iniciar);
 }
 
-function iniciar() {
+async function iniciar() {
   preferencias = crearPreferencias(path.join(app.getPath("userData"), "preferencias.json"));
+  servidor = elegirServidor({ empaquetada: app.isPackaged, variable: process.env.BODEGA_SERVIDOR });
+  const clave = await leerClaveIngreso({ raiz: RAIZ, empaquetada: app.isPackaged, variable: process.env.BODEGA_CLAVE_INGRESO });
+  ingreso = crearIngreso({ servidor, clave, fetchImpl: (...args) => net.fetch(...args) });
   Menu.setApplicationMenu(null);
   protocol.handle("app", servirArchivo);
   // La pantalla no necesita cámara, micrófono, notificaciones ni otros permisos.
@@ -53,13 +60,22 @@ function iniciar() {
 
   ipcMain.handle("preferencias:obtener", (evento) => {
     validarRemitente(evento);
-    return { ...preferencias.leer(), version: app.getVersion() };
+    return { ...preferencias.leer(), version: app.getVersion(), servidor };
+  });
+  ipcMain.handle("ingreso:operadores", (evento) => {
+    validarRemitente(evento);
+    return ingreso.operadores();
+  });
+  ipcMain.handle("ingreso:iniciar", (evento, datos) => {
+    validarRemitente(evento);
+    if (!datosIngresoValidos(datos)) return { ok: false, status: 400, codigo: "DATOS_INVALIDOS", mensaje: "Elegí tu nombre y escribí un PIN de 4 números" };
+    return ingreso.iniciar(datos);
   });
   ipcMain.handle("preferencias:guardar", (evento, cambios) => {
     validarRemitente(evento);
     const nuevas = preferencias.guardar(cambios);
     aplicar(nuevas);
-    return { ...nuevas, version: app.getVersion() };
+    return { ...nuevas, version: app.getVersion(), servidor };
   });
 
   aplicarInicioConWindows(preferencias.leer());
@@ -70,7 +86,7 @@ async function servirArchivo(solicitud) {
   const archivo = resolverArchivo(UI, solicitud.url);
   if (!archivo) return new Response("No encontrado", { status: 404 });
   try {
-    return new Response(await readFile(archivo), { status: 200, headers: cabeceras(archivo) });
+    return new Response(await readFile(archivo), { status: 200, headers: cabeceras(archivo, servidor) });
   } catch {
     return new Response("No encontrado", { status: 404 });
   }

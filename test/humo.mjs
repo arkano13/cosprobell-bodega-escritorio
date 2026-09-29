@@ -1,5 +1,5 @@
-// Prueba rápida del programa ya armado: arranca el ejecutable, se conecta a su ventana y comprueba que
-// muestre la configuración, que la página no acceda a Node y que no haya errores.
+// Prueba rápida del programa ya armado: arranca el ejecutable, se conecta a su ventana y comprueba que abra el
+// ingreso de operadores (la lista o, sin conexión, el aviso), que la página no acceda a Node y que no haya errores.
 // Uso: node test/humo.mjs "<ruta al ejecutable>" [argumentos extra]
 import { spawn } from "node:child_process";
 import { mkdtempSync, rmSync } from "node:fs";
@@ -33,17 +33,19 @@ try {
   if (!pagina) fallar("No apareció la pantalla de bodega");
   const errores = [];
   pagina.on("pageerror", (e) => errores.push(e.message));
-  await pagina.waitForSelector("#cfg-servidor", { timeout: 30000 });
+  await pagina.waitForSelector(".ingreso", { timeout: 40000 });
   const estado = await pagina.evaluate(() => ({
     titulo: document.title,
     require: typeof require,
     process: typeof process,
     puente: Object.keys(window.escritorio ?? {}).sort().join(","),
   }));
-  const esperado = { titulo: "Bodega · Cosprobell", require: "undefined", process: "undefined", puente: "guardarPreferencias,obtenerPreferencias" };
+  const esperado = { titulo: "Bodega · Cosprobell", require: "undefined", process: "undefined", puente: "guardarPreferencias,ingresar,obtenerPreferencias,operadores" };
   if (JSON.stringify(estado) !== JSON.stringify(esperado)) fallar(`Estado inesperado: ${JSON.stringify(estado)}`);
+  const servidor = (await pagina.evaluate(() => window.escritorio.obtenerPreferencias())).servidor;
+  await pagina.click("#btn-menu");
   await pagina.waitForFunction(() => document.querySelector(".version")?.textContent.includes("versión"), null, { timeout: 10000 });
-  console.log(`${await pagina.locator(".version").textContent()}: abre la configuración, sin acceso a Node.`);
+  console.log(`${await pagina.locator(".version").textContent()}: abre el ingreso de operadores, servidor ${servidor}, sin acceso a Node.`);
   if (errores.length) fallar(`Errores de página: ${errores.join("; ")}`);
   console.log("PRUEBA RÁPIDA APROBADA.");
 } catch (error) {
