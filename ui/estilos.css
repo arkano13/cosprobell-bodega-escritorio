@@ -307,6 +307,31 @@ h2 {
 
 .detalle-pedido .pedido__cliente { font-size: 22px; }
 
+/* Pedidos ya preparados: verde si se completó, ámbar si faltaron productos; siempre con insignia de texto. */
+.separador { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 12px; margin: 8px 0 14px; }
+.separador h2 { margin: 0; }
+.separador p { margin: 0; font-size: 15px; color: var(--tinta-suave); }
+.pedido--preparado { border-top-color: var(--ok); }
+.pedido--preparado .pedido__cabeza { background: var(--ok-fondo); border-bottom-color: var(--ok-borde); }
+.pedido--preparado:hover { border-color: var(--ok); }
+.pedido--preparado:active { background: var(--ok-fondo); }
+.pedido--diferencias { border-top-color: var(--alerta); }
+.pedido--diferencias .pedido__cabeza { background: var(--alerta-fondo); border-bottom-color: var(--alerta-borde); }
+.pedido--diferencias:hover { border-color: var(--alerta); }
+.pedido--diferencias:active { background: var(--alerta-fondo); }
+.pedido__ver { display: inline-flex; align-items: center; gap: 2px; font-size: 15px; font-weight: 700; color: var(--tinta-suave); white-space: nowrap; }
+.pedido__ver .icono { width: 22px; height: 22px; }
+.pedido__estado { margin-bottom: 10px; }
+.pedido__quien { margin-top: 8px; font-size: 15px; font-weight: 600; }
+.pedido--preparado .pedido__quien { color: var(--ok-texto); }
+.pedido--diferencias .pedido__quien { color: var(--alerta-texto); }
+.pedido__aviso {
+  display: flex; align-items: center; gap: 8px; margin-top: 12px; padding: 8px 10px;
+  border: 1px solid var(--alerta-borde); border-radius: 6px; background: var(--alerta-fondo);
+  color: var(--alerta-texto); font-size: 14px; font-weight: 700;
+}
+.pedido__aviso .icono { width: 18px; height: 18px; color: var(--alerta-texto); }
+
 /* ---------- Líneas del pedido ---------- */
 .lineas { list-style: none; margin: 0; padding: 0; }
 .linea {
