@@ -1,6 +1,7 @@
 import { crearApi } from "./api.js";
 import { crearColaLecturas } from "./lecturas.js";
 import { icono } from "./iconos.js";
+import { textosPreparado } from "./preparados.js";
 
 // ---------------------------------------------------------------------------
 // Utilidades
@@ -346,22 +347,55 @@ async function vistaPedidos() {
   const masBoton = boton("boton--ancho", null, "Cargar más pedidos");
   const vacio = h("p", { class: "suave vacio" });
   const contador = h("span", { class: "contador" });
+  // Los pedidos ya preparados van aparte, al final: siguen abiertos en SAP hasta que se registra la entrega.
+  const listaPreparados = h("ul", { class: "pedidos" });
+  const contadorPreparados = h("span", { class: "contador" });
+  const seccionPreparados = h("section", { class: "preparados", "aria-labelledby": "titulo-preparados" },
+    h("div", { class: "separador" }, h("h2", { id: "titulo-preparados" }, "Preparados"), contadorPreparados,
+      h("p", {}, "Salen de la lista cuando SAP cierra el pedido.")),
+    listaPreparados);
+
+  const tarjetaPendiente = (p) => h("li", {},
+    h("button", { class: "pedido", type: "button", onclick: () => vistaPedido(p.docEntry) },
+      h("div", { class: "pedido__cabeza" },
+        h("div", { class: "pedido__numero" }, h("span", { class: "rotulo" }, "Pedido"), " ", String(p.docNum)),
+        icono("siguiente", "icono pedido__flecha")),
+      h("div", { class: "pedido__cuerpo" },
+        h("div", { class: "pedido__cliente" }, p.cliente?.cardName ?? p.cardCode),
+        h("div", { class: "pedido__meta" }, `Fecha ${fecha(p.docDate)} · Entrega ${fecha(p.docDueDate)}`),
+        h("div", { class: "pedido__meta" }, `Datos de SAP ${hace(p.sincronizadoEn)}`))));
+  function tarjetaPreparado(p) {
+    const textos = textosPreparado(p.preparado);
+    return h("li", {},
+      h("button", { class: `pedido ${textos.completo ? "pedido--preparado" : "pedido--diferencias"}`, type: "button", onclick: () => verResumen(p) },
+        h("div", { class: "pedido__cabeza" },
+          h("div", { class: "pedido__numero" }, h("span", { class: "rotulo" }, "Pedido"), " ", String(p.docNum)),
+          h("span", { class: "pedido__ver" }, "Ver resumen", icono("siguiente"))),
+        h("div", { class: "pedido__cuerpo" },
+          h("div", { class: "pedido__estado" }, h("span", { class: `insignia ${textos.completo ? "insignia--ok" : "insignia--alerta"}` },
+            icono(textos.completo ? "completa" : "alerta"), textos.estado)),
+          h("div", { class: "pedido__cliente" }, p.cliente?.cardName ?? p.cardCode),
+          textos.quien && h("div", { class: "pedido__quien" }, textos.quien),
+          h("div", { class: "pedido__meta" }, textos.unidades),
+          textos.aviso && h("div", { class: "pedido__aviso" }, icono("alerta"), textos.aviso))));
+  }
 
   function pintar() {
     const filtro = buscador.value.trim().toLowerCase();
     const visibles = pedidos.filter((p) => !filtro || String(p.docNum).includes(filtro) || (p.cliente?.cardName ?? "").toLowerCase().includes(filtro));
-    lista.replaceChildren(...visibles.map((p) => h("li", {},
-      h("button", { class: "pedido", type: "button", onclick: () => vistaPedido(p.docEntry) },
-        h("div", { class: "pedido__cabeza" },
-          h("div", { class: "pedido__numero" }, h("span", { class: "rotulo" }, "Pedido"), " ", String(p.docNum)),
-          icono("siguiente", "icono pedido__flecha")),
-        h("div", { class: "pedido__cuerpo" },
-          h("div", { class: "pedido__cliente" }, p.cliente?.cardName ?? p.cardCode),
-          h("div", { class: "pedido__meta" }, `Fecha ${fecha(p.docDate)} · Entrega ${fecha(p.docDueDate)}`),
-          h("div", { class: "pedido__meta" }, `Datos de SAP ${hace(p.sincronizadoEn)}`))))));
+    const pendientes = visibles.filter((p) => !p.preparado);
+    const preparados = visibles.filter((p) => p.preparado);
+    lista.replaceChildren(...pendientes.map(tarjetaPendiente));
+    listaPreparados.replaceChildren(...preparados.map(tarjetaPreparado));
+    lista.hidden = pendientes.length === 0;
+    seccionPreparados.hidden = preparados.length === 0;
+    contadorPreparados.textContent = String(preparados.length);
+    contadorPreparados.setAttribute("aria-label", `${preparados.length} pedidos preparados`);
     contador.textContent = `${pedidos.length}${cursor === null ? "" : "+"}`;
     contador.setAttribute("aria-label", `${contador.textContent} pedidos cargados`);
-    vacio.textContent = pedidos.length ? (visibles.length ? "" : "Ningún pedido coincide con la búsqueda.") : "No hay pedidos abiertos.";
+    vacio.textContent = !pedidos.length ? "No hay pedidos abiertos."
+      : !visibles.length ? "Ningún pedido coincide con la búsqueda."
+        : !pendientes.length && !filtro ? "Todos los pedidos abiertos ya están preparados." : "";
     vacio.hidden = !vacio.textContent;
     masBoton.hidden = cursor === null;
   }
@@ -382,8 +416,17 @@ async function vistaPedidos() {
   mostrarAmplio(
     h("div", { class: "encabezado" }, h("div", { class: "encabezado__titulo" }, h("h1", {}, "Pedidos abiertos"), contador),
       boton("", "actualizar", "Actualizar", { onclick: () => vistaPedidos() })),
-    abierta, h("label", { class: "buscador" }, icono("buscar"), buscador), vacio, lista, masBoton);
+    abierta, h("label", { class: "buscador" }, icono("buscar"), buscador), vacio, lista, seccionPreparados, masBoton);
   pintar();
+}
+
+// Un pedido ya preparado abre su resumen; no se puede empezar otra preparación hasta que SAP lo cierre.
+async function verResumen(p) {
+  mostrar(cargando("Cargando resumen…"));
+  try {
+    const [pedido, sesion] = await Promise.all([api.pedido(p.docEntry).then((r) => r.data), api.sesion(p.preparado.pickingId).then((r) => r.data)]);
+    vistaResumen(sesion, pedido);
+  } catch (error) { mostrarError(error, () => verResumen(p)); }
 }
 
 // ---------------------------------------------------------------------------

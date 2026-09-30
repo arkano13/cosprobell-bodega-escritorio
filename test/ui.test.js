@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 import { crearApi, ErrorApi } from "../ui/js/api.js";
 import { crearColaLecturas } from "../ui/js/lecturas.js";
 import { nuevoUuid } from "../ui/js/uuid.js";
+import { HORAS_SIN_ENTREGA, textosPreparado } from "../ui/js/preparados.js";
 
 const sinEspera = async () => {};
 const temporal = () => new ErrorApi({ mensaje: "Sin conexión con el servidor", temporal: true });
@@ -108,4 +109,35 @@ test("api: usa la dirección del servidor como base", async () => {
   assert.deepEqual(JSON.parse(envios[1].body), { pedidoDocEntry: 9 });
   await api.cerrarSesion();
   assert.deepEqual([urls[2], envios[2].method], ["https://bodega.ejemplo.com/ingreso/sesion", "DELETE"]);
+});
+
+test("preparados: estado, quién y cuándo, unidades y aviso sin entrega en SAP", () => {
+  const ahora = new Date(2026, 8, 30, 12, 0).getTime();
+  const hoy = textosPreparado({ estado: "completo", operador: "Ana López", fechaFin: new Date(2026, 8, 30, 9, 15).toISOString(),
+    unidadesPreparadas: 14, unidadesPedidas: 14 }, ahora);
+  assert.equal(hoy.completo, true);
+  assert.equal(hoy.estado, "Preparado");
+  assert.match(hoy.quien, /^Preparado por Ana López · 9:15/);
+  assert.equal(hoy.unidades, "14 de 14 unidades");
+  assert.equal(hoy.aviso, null);
+
+  const ayer = textosPreparado({ estado: "con_diferencias", operador: "Luis Pérez", fechaFin: new Date(2026, 8, 29, 13, 48).toISOString(),
+    unidadesPreparadas: 9, unidadesPedidas: 11 }, ahora);
+  assert.equal(ayer.completo, false);
+  assert.equal(ayer.estado, "Preparado con diferencias");
+  assert.match(ayer.quien, /^Preparado por Luis Pérez · ayer 1:48/);
+  assert.equal(ayer.unidades, "9 de 11 unidades · faltaron 2");
+  assert.equal(ayer.aviso, null, "menos de 24 h: sin aviso");
+
+  const hora = 3_600_000;
+  const base = { estado: "con_diferencias", operador: null, unidadesPreparadas: 5, unidadesPedidas: 6 };
+  assert.equal(HORAS_SIN_ENTREGA, 24);
+  assert.equal(textosPreparado({ ...base, fechaFin: new Date(ahora - 24 * hora + 1).toISOString() }, ahora).aviso, null);
+  assert.equal(textosPreparado({ ...base, fechaFin: new Date(ahora - 26 * hora).toISOString() }, ahora).aviso, "Sin entrega en SAP hace 26 h");
+  assert.equal(textosPreparado({ ...base, fechaFin: new Date(ahora - 75 * hora).toISOString() }, ahora).aviso, "Sin entrega en SAP hace 3 días");
+  const sinDatos = textosPreparado({ ...base, fechaFin: null }, ahora);
+  assert.equal(sinDatos.quien, "");
+  assert.equal(sinDatos.unidades, "5 de 6 unidades · faltó 1");
+  assert.equal(sinDatos.aviso, null);
+  assert.equal(textosPreparado({ ...base, unidadesPreparadas: 1, unidadesPedidas: 1, fechaFin: null }, ahora).unidades, "1 de 1 unidad");
 });
