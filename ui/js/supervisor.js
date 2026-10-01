@@ -4,10 +4,12 @@ const hora = (iso) => new Date(iso).toLocaleTimeString("es-HN", { hour: "numeric
 
 export const NOMBRES_DATOS = {
   pedidos: "Pedidos", clientes: "Clientes", productos: "Productos", unidades: "Unidades de medida", codigosBarras: "Códigos de barras",
+  almacenes: "Almacenes", existencias: "Existencias por almacén", documentos: "Entradas, salidas y devoluciones",
 };
 
-// Pedidos: la bodega necesita datos de menos de una hora (la app ya avisa en cada pedido). El resto cambia poco.
-export const MINUTOS_PARA_AVISO = { pedidos: 60 };
+// Pedidos y existencias: la bodega necesita datos de menos de una hora (el inventario compara contra ellas).
+// El resto cambia poco.
+export const MINUTOS_PARA_AVISO = { pedidos: 60, existencias: 60 };
 const MINUTOS_PARA_AVISO_RESTO = 24 * 60;
 
 export function estadoDatos({ entidad, ultimaRecepcion }, ahora = Date.now()) {
