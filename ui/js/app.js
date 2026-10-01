@@ -2,6 +2,7 @@ import { crearApi } from "./api.js";
 import { crearColaLecturas } from "./lecturas.js";
 import { icono } from "./iconos.js";
 import { textosPreparado } from "./preparados.js";
+import { NOMBRES_DATOS, estadoDatos, estadoOperador, puedeSerUnidad, quienConfirmo, textoCambio, textoRevision, textoSinEntrega, textoUnidad } from "./supervisor.js";
 
 // ---------------------------------------------------------------------------
 // Utilidades
@@ -143,11 +144,14 @@ function guardarSesion(sesion) {
   if (sesion) guardado.escribir("sesion", sesion); else guardado.borrar("sesion");
 }
 
+// El panel del supervisor solo se ofrece a quien ingresó con rol supervisor; el servidor también lo exige.
+const esSupervisor = () => Boolean(api) && estado.ingreso?.operador?.rol === "supervisor";
+
 function actualizarBarra() {
   const operador = document.getElementById("operador");
   const nombre = api ? estado.ingreso?.operador?.nombre : null;
   operador.hidden = !nombre;
-  operador.replaceChildren(...(nombre ? [icono("operador"), h("span", {}, `Operador: ${nombre}`)] : []));
+  operador.replaceChildren(...(nombre ? [icono(esSupervisor() ? "escudo" : "operador"), h("span", {}, `${esSupervisor() ? "Supervisor" : "Operador"}: ${nombre}`)] : []));
 }
 
 // Termina la sesión en este equipo. Las lecturas pendientes quedan guardadas y se envían al volver a ingresar.
@@ -306,7 +310,9 @@ async function abrirMenu() {
   dialogo.replaceChildren(
     h("div", { class: "dialogo__cuerpo menu" },
       h("h2", {}, "Menú"),
-      nombre && h("div", { class: "menu__operador" }, icono("operador"), h("div", {}, h("span", { class: "rotulo" }, "Operador"), h("strong", {}, nombre))),
+      nombre && h("div", { class: "menu__operador" }, icono(esSupervisor() ? "escudo" : "operador"),
+        h("div", {}, h("span", { class: "rotulo" }, esSupervisor() ? "Supervisor" : "Operador"), h("strong", {}, nombre))),
+      esSupervisor() && boton("boton--principal boton--ancho menu__panel", "escudo", "Panel del supervisor", { onclick: () => { dialogo.close(); vistaSupervisor(); } }),
       nombre && boton("boton--ancho", "salir", "Cambiar de operador", { onclick: cambiarOperador }),
       escritorio && h("fieldset", { class: "opciones" }, h("legend", {}, "Este equipo"),
         h("label", { class: "opcion", for: "menu-inicio" }, inicioWindows, "Abrir la app al iniciar Windows"),
@@ -506,6 +512,14 @@ async function vistaEscaneo() {
     guardarSesion(null);
     return vistaResumen(sesion, pedido);
   }
+  if (sesion.estado === "anulada") {
+    guardarSesion(null);
+    guardado.borrar(`cola.${pickingId}`);
+    lecturas = null;
+    return mostrar(h("div", { class: "tarjeta" },
+      aviso("alerta", `El supervisor reinició la preparación del pedido ${pedido.docNum} porque SAP cambió el pedido. Empezala de nuevo desde la lista.`),
+      boton("boton--principal", "lista", "Ver pedidos", { onclick: () => vistaPedidos() })));
+  }
   guardarSesion({ ...estado.sesion, docNum: pedido.docNum });
   const lineasPedido = new Map(pedido.lineas.map((l) => [l.lineNum, l]));
   let lineaReciente = null;
@@ -622,32 +636,7 @@ async function vistaEscaneo() {
   // Vuelve enseguida: si el foco queda en un botón, el Enter del lector lo activaría.
   entrada.addEventListener("blur", () => setTimeout(enfocar, 0));
 
-  async function verLecturas() {
-    dialogo.replaceChildren(h("div", { class: "dialogo__cuerpo" }, cargando("Cargando lecturas…")));
-    dialogo.showModal();
-    const lecturas = [];
-    try {
-      let despuesDe = null;
-      do {
-        const pagina = await api.escaneos(pickingId, despuesDe);
-        lecturas.push(...pagina.data); despuesDe = pagina.siguienteCursor;
-      } while (despuesDe !== null);
-    } catch (error) {
-      dialogo.replaceChildren(h("div", { class: "dialogo__cuerpo" }, aviso("error", error.mensaje)),
-        h("div", { class: "dialogo__acciones" }, boton("", null, "Cerrar", { onclick: () => dialogo.close() })));
-      return;
-    }
-    dialogo.replaceChildren(
-      h("div", { class: "dialogo__cuerpo" }, h("h2", {}, `Lecturas (${lecturas.length})`),
-        lecturas.length === 0 ? h("p", { class: "suave" }, "Todavía no hay lecturas.") :
-          h("ul", { class: "historial" }, lecturas.reverse().map((l) => h("li", {},
-            l.resultado === "aceptado" ? icono("aceptada", "icono historial__ok") : icono("rechazada", "icono historial__error"),
-            h("span", {}, `${l.resultado === "aceptado" ? "Aceptada" : "Rechazada"} · ${new Date(l.creadoEn).toLocaleTimeString("es-HN")} · ${l.codigo}`),
-            h("div", { class: "suave" }, l.resultado === "aceptado"
-              ? `${l.itemCode ?? ""} · quedó en ${cantidad(l.cantidadDespues)}` : (l.errorMessage ?? "Rechazada")))))),
-      h("div", { class: "dialogo__acciones" }, boton("", null, "Cerrar", { onclick: () => dialogo.close() })));
-  }
-
+  const verLecturas = () => mostrarLecturas(pickingId);
   async function finalizar() {
     if (cola.pendientes > 0) {
       mostrarResultado("error", "Hay lecturas sin enviar", "Esperá a que se envíen antes de finalizar.");
@@ -703,11 +692,38 @@ async function vistaEscaneo() {
   cola.reanudar();
 }
 
+// Historial de lecturas de una preparación (escaneo y panel del supervisor).
+async function mostrarLecturas(pickingId) {
+  dialogo.replaceChildren(h("div", { class: "dialogo__cuerpo" }, cargando("Cargando lecturas…")));
+  dialogo.showModal();
+  const lecturas = [];
+  try {
+    let despuesDe = null;
+    do {
+      const pagina = await api.escaneos(pickingId, despuesDe);
+      lecturas.push(...pagina.data); despuesDe = pagina.siguienteCursor;
+    } while (despuesDe !== null);
+  } catch (error) {
+    dialogo.replaceChildren(h("div", { class: "dialogo__cuerpo" }, aviso("error", error.mensaje)),
+      h("div", { class: "dialogo__acciones" }, boton("", null, "Cerrar", { onclick: () => dialogo.close() })));
+    return;
+  }
+  dialogo.replaceChildren(
+    h("div", { class: "dialogo__cuerpo" }, h("h2", {}, `Lecturas (${lecturas.length})`),
+      lecturas.length === 0 ? h("p", { class: "suave" }, "Todavía no hay lecturas.") :
+        h("ul", { class: "historial" }, lecturas.reverse().map((l) => h("li", {},
+          l.resultado === "aceptado" ? icono("aceptada", "icono historial__ok") : icono("rechazada", "icono historial__error"),
+          h("span", {}, `${l.resultado === "aceptado" ? "Aceptada" : "Rechazada"} · ${new Date(l.creadoEn).toLocaleTimeString("es-HN")} · ${l.codigo}`),
+          h("div", { class: "suave" }, l.resultado === "aceptado"
+            ? `${l.itemCode ?? ""} · quedó en ${cantidad(l.cantidadDespues)}` : (l.errorMessage ?? "Rechazada")))))),
+    h("div", { class: "dialogo__acciones" }, boton("", null, "Cerrar", { onclick: () => dialogo.close() })));
+}
+
 // ---------------------------------------------------------------------------
 // Resumen al finalizar
 // ---------------------------------------------------------------------------
 
-function vistaResumen(sesion, pedido) {
+function vistaResumen(sesion, pedido, volver = { texto: "Volver a pedidos", accion: () => vistaPedidos() }) {
   const lineasPedido = new Map(pedido.lineas.map((l) => [l.lineNum, l]));
   const faltantes = sesion.lineas.filter((l) => l.cantidadEscaneada < l.cantidadPedida);
   const completo = sesion.estado === "completo";
@@ -734,7 +750,348 @@ function vistaResumen(sesion, pedido) {
       h("ul", { class: "lineas" }, faltantes.map((l) => tarjetaLinea(l.pedidoLineNum,
         { ...lineasPedido.get(l.pedidoLineNum), itemCode: l.itemCode, uomCode: l.uomCode },
         { pedida: l.cantidadPedida, escaneada: l.cantidadEscaneada })))),
-    boton("boton--principal boton--ancho boton--grande", "volver", "Volver a pedidos", { onclick: () => vistaPedidos() }));
+    boton("boton--principal boton--ancho boton--grande", "volver", volver.texto, { onclick: volver.accion }));
+}
+
+// ---------------------------------------------------------------------------
+// Panel del supervisor: etiquetas, operadores, revisiones y sincronización
+// ---------------------------------------------------------------------------
+
+const numero = (valor) => Number(valor).toLocaleString("es-HN");
+
+// Formulario en el diálogo. Resuelve los datos escritos o null si se cancela.
+function pedirDatos({ titulo, texto = null, campos, aceptar, validar = () => null }) {
+  return new Promise((resolver) => {
+    let resuelto = false;
+    const cerrar = (valor) => { resuelto = true; dialogo.close(); resolver(valor); };
+    const error = aviso("error", "", { role: "alert", hidden: true });
+    const entradas = campos.map((c) => ({ ...c, el: c.tipo === "casilla"
+      ? h("input", { id: `campo-${c.nombre}`, type: "checkbox" })
+      : h("input", { id: `campo-${c.nombre}`, class: "campo", type: c.tipo ?? "text", inputmode: c.inputmode, maxlength: c.maxlength,
+        autocomplete: "off", spellcheck: "false" }) }));
+    const leer = () => Object.fromEntries(entradas.map((c) => [c.nombre, c.tipo === "casilla" ? c.el.checked : c.el.value.trim()]));
+    dialogo.replaceChildren(h("form", { class: "dialogo__formulario", onsubmit: (evento) => {
+      evento.preventDefault();
+      const datos = leer();
+      const problema = validar(datos);
+      if (problema) { textoAviso(error, problema); error.hidden = false; return; }
+      cerrar(datos);
+    } },
+    h("div", { class: "dialogo__cuerpo" }, h("h2", {}, titulo), texto && h("p", {}, texto), error,
+      entradas.map((c) => (c.tipo === "casilla"
+        ? h("label", { class: "opcion", for: c.el.id }, c.el, c.etiqueta)
+        : h("label", { class: "campo-etiqueta", for: c.el.id }, h("span", {}, c.etiqueta), c.el, c.ayuda && h("small", { class: "suave" }, c.ayuda))))),
+    h("div", { class: "dialogo__acciones" },
+      h("button", { class: "boton", type: "button", onclick: () => cerrar(null) }, "Cancelar"),
+      h("button", { class: "boton boton--principal", type: "submit" }, aceptar))));
+    dialogo.onclose = () => { if (!resuelto) resolver(null); };
+    dialogo.showModal();
+    entradas[0]?.el.focus();
+  });
+}
+
+const PESTANAS = [
+  { id: "etiquetas", icono: "etiqueta", texto: "Etiquetas", contar: (r) => r.etiquetas.sinConfirmar + r.etiquetas.desactualizadas },
+  { id: "operadores", icono: "personas", texto: "Operadores", contar: (r) => r.operadores.bloqueados },
+  { id: "revisiones", icono: "alerta", texto: "Revisiones", contar: (r) => r.revisiones.enRevision + r.revisiones.conDiferencias + r.revisiones.sinEntrega },
+  { id: "sincronizacion", icono: "sincronizar", texto: "Sincronización" },
+];
+
+async function vistaSupervisor(pestana = "etiquetas") {
+  if (!esSupervisor()) return vistaPedidos();
+  const nav = h("nav", { class: "pestanas", "aria-label": "Secciones del panel" });
+  const mensaje = h("div", { class: "panel__mensaje", "aria-live": "polite" });
+  const contenido = h("div", { class: "panel" }, cargando("Cargando…"));
+  let resumen = null;
+  function pintarPestanas() {
+    nav.replaceChildren(...PESTANAS.map((p) => {
+      const n = resumen && p.contar ? p.contar(resumen) : 0;
+      return h("button", { class: "pestana", type: "button", "aria-current": p.id === pestana ? "page" : null, onclick: () => vistaSupervisor(p.id) },
+        icono(p.icono), p.texto, n > 0 && h("span", { class: "contador contador--alerta", "aria-label": `${n} pendientes` }, numero(n)));
+    }));
+  }
+  // Mensaje de la última acción (éxito o problema) arriba del contenido.
+  const avisar = (tipo, texto, extra = null) => mensaje.replaceChildren(texto ? aviso(tipo, texto, { role: tipo === "error" ? "alert" : "status" }) : "", extra ?? "");
+  const panel = {
+    contenido, avisar,
+    async refrescar() {
+      try { resumen = (await api.resumenSupervisor()).data; pintarPestanas(); } catch (error) { panel.fallo(error); }
+      return resumen;
+    },
+    // Sesión vencida o sin permiso: fuera del panel. El resto, aviso en el panel.
+    fallo(error, reintentar = null) {
+      if (error?.status === 401 || error?.status === 403) return mostrarError(error);
+      avisar("error", error?.mensaje ?? "Ocurrió un error inesperado",
+        reintentar && boton("", "actualizar", "Reintentar", { onclick: () => { avisar(null, ""); reintentar(); } }));
+      return null;
+    },
+  };
+  pintarPestanas();
+  mostrarAmplio(boton("boton--volver", "volver", "Volver a pedidos", { onclick: () => vistaPedidos() }),
+    h("div", { class: "encabezado" }, h("h1", {}, "Panel del supervisor")), nav, mensaje, contenido);
+  await panel.refrescar();
+  const secciones = { etiquetas: panelEtiquetas, operadores: panelOperadores, revisiones: panelRevisiones, sincronizacion: panelSincronizacion };
+  await secciones[pestana](panel);
+}
+
+const insignia = (tipo, nombreIcono, texto) => h("span", { class: `insignia insignia--${tipo}` }, nombreIcono && icono(nombreIcono), texto);
+
+function filaAdmin({ clase = "", nombre, detalle = [], dato, acciones = [], nota = null }) {
+  return h("li", { class: `fila-admin ${clase}`.trim() },
+    h("div", {}, h("div", { class: "fila-admin__nombre" }, nombre), h("div", { class: "fila-admin__detalle" }, detalle)),
+    h("div", { class: "fila-admin__dato" }, dato),
+    h("div", { class: "fila-admin__acciones" }, acciones),
+    nota && h("p", { class: "fila-admin__nota" }, icono("info"), nota));
+}
+const dato = (rotulo, valor, extra = null) => [h("span", { class: "rotulo" }, rotulo), h("strong", {}, valor), extra && h("span", { class: "suave" }, extra)];
+
+async function panelEtiquetas(panel) {
+  let filtro = "sin_confirmar", buscar = "", cursor = null, filas = [], conteo = null;
+  const cabecera = h("div");
+  const buscador = h("input", { class: "buscador__campo", type: "search", placeholder: "Escaneá o escribí un código o un producto",
+    "aria-label": "Buscar código o producto", autocomplete: "off", spellcheck: "false" });
+  const filtros = h("div", { class: "filtros", role: "group", "aria-label": "Filtrar etiquetas" });
+  const lista = h("ul", { class: "filas" });
+  const vacio = h("p", { class: "suave vacio", hidden: true });
+  const mas = boton("boton--ancho", null, "Cargar más", { hidden: true, onclick: () => cargar(true) });
+
+  function pintarCabecera() {
+    const c = conteo ?? { sinConfirmar: 0, desactualizadas: 0, confirmadas: 0, manualSinConfirmar: 0 };
+    const pendientes = c.sinConfirmar + c.desactualizadas;
+    cabecera.replaceChildren(
+      pendientes > 0
+        ? aviso("alerta", `${numero(pendientes)} ${pendientes === 1 ? "código espera" : "códigos esperan"} confirmación. Hasta confirmarlos, la bodega no puede escanearlos.`)
+        : aviso("ok", "Todos los códigos de barras están confirmados."),
+      c.manualSinConfirmar > 0 ? h("div", { class: "tarjeta masiva" },
+        h("div", {}, h("strong", {}, `${numero(c.manualSinConfirmar)} ${c.manualSinConfirmar === 1 ? "código" : "códigos"} con unidad Manual sin confirmar`),
+          h("p", { class: "suave" }, "En SAP se venden de a una unidad del artículo: se pueden confirmar todos juntos. Los de otras unidades se revisan de a uno.")),
+        boton("boton--principal", "completa", `Confirmar todos como unidad (${numero(c.manualSinConfirmar)})`, { onclick: confirmarTodos })) : "");
+    filtros.replaceChildren(...[["sin_confirmar", "Sin confirmar", c.sinConfirmar], ["desactualizadas", "Cambiaron en SAP", c.desactualizadas],
+      ["confirmadas", "Confirmadas", c.confirmadas]].map(([id, texto, n]) => h("button", { class: "filtro", type: "button", "aria-pressed": String(id === filtro),
+      onclick: () => { filtro = id; cargar(); } }, id === "desactualizadas" && icono("alerta"), texto, h("span", { class: "n" }, numero(n)))));
+  }
+
+  function fila(e) {
+    const confirmable = e.estado === "sin_confirmar" || e.estado === "desactualizada";
+    const insignias = { desactualizada: insignia("alerta", "alerta", "Cambió en SAP"), unidad_individual: insignia("ok", "completa", "Es una unidad"),
+      no_es_unidad: insignia("gris", null, "No es una unidad") };
+    const confirmacion = e.confirmacion && `${quienConfirmo(e.confirmacion.confirmadaPor)} el ${fechaHora(e.confirmacion.confirmadaEn)}`;
+    let nota = null;
+    if (confirmable && !puedeSerUnidad(e)) nota = "No se puede confirmar como unidad: el código no tiene unidad de medida en SAP.";
+    else if (e.estado === "desactualizada") nota = `Cambió en SAP después de confirmarse${confirmacion ? ` (lo confirmó ${confirmacion})` : ""}. Revisalo de nuevo.`;
+    return filaAdmin({
+      clase: e.estado === "desactualizada" ? "fila-admin--alerta" : e.estado === "no_es_unidad" ? "fila-admin--apagada" : "",
+      nombre: e.itemName ?? e.itemCode,
+      detalle: [h("span", { class: "codigo" }, e.itemCode), h("span", { class: "codigo" }, e.codigo), insignias[e.estado] ?? ""],
+      dato: dato("Unidad en SAP", textoUnidad(e), !confirmable && confirmacion ? `Confirmado por ${confirmacion}` : null),
+      acciones: confirmable
+        ? [boton("boton--principal", "completa", "Es una unidad", { disabled: !puedeSerUnidad(e), onclick: () => decidir(e, true) }),
+          boton("", null, "No es una unidad", { onclick: () => decidir(e, false) })]
+        : [boton("", null, "Quitar confirmación", { onclick: () => quitar(e) })],
+      nota,
+    });
+  }
+
+  function pintarLista() {
+    lista.replaceChildren(...filas.map(fila));
+    vacio.textContent = filas.length ? "" : buscar ? "Ningún código coincide con la búsqueda." : "No hay códigos en esta lista.";
+    vacio.hidden = filas.length > 0;
+    mas.hidden = cursor === null;
+  }
+
+  async function cargar(siguiente = false) {
+    if (!siguiente) { cursor = null; filas = []; lista.replaceChildren(cargando("Cargando códigos…")); vacio.hidden = true; mas.hidden = true; }
+    pintarCabecera();
+    try {
+      const r = await api.etiquetasSupervisor({ estado: filtro, buscar, cursor });
+      filas.push(...r.data); cursor = r.siguienteCursor;
+      pintarLista();
+    } catch (error) { lista.replaceChildren(); panel.fallo(error, () => cargar()); }
+  }
+  async function recargar() {
+    conteo = (await panel.refrescar())?.etiquetas ?? conteo;
+    await cargar();
+  }
+
+  async function decidir(e, esUnidad) {
+    try {
+      await api.confirmarEtiqueta(e.id, esUnidad);
+      panel.avisar("ok", `${e.codigo}: ${esUnidad ? "confirmado como unidad" : "marcado como que no es una unidad"}.`);
+      await recargar();
+    } catch (error) { panel.fallo(error); }
+  }
+  async function quitar(e) {
+    if (!(await confirmar({ titulo: "Quitar confirmación", texto: [`${e.codigo} vuelve a "Sin confirmar" y la bodega no puede escanearlo hasta que alguien lo confirme de nuevo.`], aceptar: "Quitar" }))) return;
+    try { await api.quitarConfirmacion(e.id); panel.avisar("ok", `${e.codigo}: confirmación quitada.`); await recargar(); } catch (error) { panel.fallo(error); }
+  }
+  async function confirmarTodos() {
+    const cantidadEsperada = conteo?.manualSinConfirmar ?? 0;
+    if (!(await confirmar({ titulo: "Confirmar todos como unidad", aceptar: `Confirmar ${numero(cantidadEsperada)}`,
+      texto: [`Se van a confirmar ${numero(cantidadEsperada)} códigos con unidad Manual como unidad individual: cada lectura cuenta 1 unidad del producto.`,
+        "Si alguno es de una caja, después lo podés cambiar a \"No es una unidad\" desde Confirmadas."] }))) return;
+    try {
+      const { data } = await api.confirmarManual(cantidadEsperada);
+      panel.avisar("ok", `${numero(data.confirmadas)} códigos confirmados como unidad.`);
+    } catch (error) { panel.fallo(error); }
+    await recargar();
+  }
+
+  let espera = null;
+  buscador.addEventListener("input", () => { clearTimeout(espera); espera = setTimeout(() => { buscar = buscador.value.trim(); cargar(); }, 350); });
+  limpiezas.push(() => clearTimeout(espera));
+  const formulario = h("form", { class: "buscador", role: "search", onsubmit: (evento) => {
+    evento.preventDefault(); clearTimeout(espera); buscar = buscador.value.trim(); buscador.select(); cargar();
+  } }, icono("escaner"), buscador);
+
+  panel.contenido.replaceChildren(cabecera, formulario, filtros, lista, vacio, mas);
+  conteo = (await panel.refrescar())?.etiquetas ?? null;
+  await cargar();
+  buscador.focus();
+}
+
+async function panelOperadores(panel) {
+  const lista = h("ul", { class: "filas" });
+  const propio = estado.ingreso?.operador?.id;
+  const VALIDAR_PIN = (pin) => (/^\d{4}$/.test(pin) ? null : "El PIN tiene que tener exactamente 4 números.");
+
+  function fila(o) {
+    const e = estadoOperador(o);
+    const trabado = o.estado === "bloqueado" || o.estado === "pausa";
+    return filaAdmin({
+      clase: o.estado === "inactivo" ? "fila-admin--apagada" : trabado ? "fila-admin--alerta" : "",
+      nombre: o.id === propio ? `${o.nombre} (vos)` : o.nombre,
+      detalle: [o.rol === "supervisor" ? insignia("rol", "escudo", "Supervisor") : "",
+        insignia(e.tipo, e.tipo === "ok" ? "completa" : e.tipo === "gris" ? null : e.tipo === "error" ? "candado" : "alerta", e.texto), e.detalle],
+      dato: dato("Último ingreso", o.ultimoIngreso ? fechaHora(o.ultimoIngreso) : "Nunca"),
+      acciones: [
+        trabado && boton("boton--principal", "abierto", "Desbloquear", { onclick: () => accion(() => api.desbloquear(o.id), `${o.nombre} ya puede ingresar.`) }),
+        o.activo && boton("", "candado", "Cambiar PIN", { onclick: () => cambiarPin(o) }),
+        o.activo && o.id !== propio && boton("", null, "Desactivar", { onclick: () => desactivar(o) }),
+        !o.activo && boton("boton--principal", null, "Activar", { onclick: () => accion(() => api.cambiarActivo(o.id, true), `${o.nombre} vuelve a aparecer en la lista de ingreso.`) }),
+      ].filter(Boolean),
+    });
+  }
+  async function cargar() {
+    try { lista.replaceChildren(...(await api.operadoresSupervisor()).data.map(fila)); } catch (error) { panel.fallo(error, cargar); }
+  }
+  async function accion(llamada, texto) {
+    try {
+      const { data } = await llamada();
+      panel.avisar("ok", texto, data?.advertencia ? aviso("alerta", data.advertencia) : null);
+      await Promise.all([cargar(), panel.refrescar()]);
+    } catch (error) { panel.fallo(error); }
+  }
+  async function cambiarPin(o) {
+    const datos = await pedirDatos({ titulo: `Cambiar el PIN de ${o.nombre}`, aceptar: "Cambiar PIN",
+      texto: o.id === propio ? "Tu sesión en este equipo sigue abierta; las demás se cierran." : "Se cierran sus sesiones abiertas.",
+      campos: [{ nombre: "pin", etiqueta: "PIN nuevo de 4 números", tipo: "password", inputmode: "numeric", maxlength: 4 },
+        { nombre: "repetir", etiqueta: "Repetir el PIN", tipo: "password", inputmode: "numeric", maxlength: 4 }],
+      validar: (d) => VALIDAR_PIN(d.pin) ?? (d.pin === d.repetir ? null : "Los dos PIN no coinciden.") });
+    if (datos) await accion(() => api.cambiarPin(o.id, datos.pin), `PIN de ${o.nombre} cambiado.`);
+  }
+  async function desactivar(o) {
+    if (!(await confirmar({ titulo: `Desactivar a ${o.nombre}`, peligro: true, aceptar: "Desactivar",
+      texto: ["Ya no va a aparecer en la lista de ingreso y se cierran sus sesiones. Lo podés activar de nuevo cuando quieras."] }))) return;
+    await accion(() => api.cambiarActivo(o.id, false), `${o.nombre} quedó desactivado.`);
+  }
+  async function agregar() {
+    const datos = await pedirDatos({ titulo: "Agregar persona", aceptar: "Agregar",
+      campos: [{ nombre: "nombre", etiqueta: "Nombre y apellido", maxlength: 60 },
+        { nombre: "pin", etiqueta: "PIN de 4 números", tipo: "password", inputmode: "numeric", maxlength: 4, ayuda: "Lo usa para ingresar. Evitá 1234 o 0000." },
+        { nombre: "supervisor", etiqueta: "Es supervisor (puede usar este panel)", tipo: "casilla" }],
+      validar: (d) => (d.nombre.length < 2 ? "Escribí el nombre." : VALIDAR_PIN(d.pin)) });
+    if (datos) {
+      await accion(() => api.crearOperador({ nombre: datos.nombre, pin: datos.pin, rol: datos.supervisor ? "supervisor" : "operador" }),
+        `${datos.nombre} ya puede ingresar con su PIN.`);
+    }
+  }
+  panel.contenido.replaceChildren(
+    h("div", { class: "fila fila--entre panel__intro" },
+      h("p", { class: "suave" }, "Cada persona ingresa con su nombre y un PIN de 4 números. Cambiar el PIN o desactivar cierra sus sesiones abiertas."),
+      boton("boton--principal", "mas", "Agregar persona", { onclick: agregar })),
+    lista);
+  await cargar();
+}
+
+async function panelRevisiones(panel) {
+  let datos;
+  try { datos = (await api.revisiones()).data; } catch (error) { panel.contenido.replaceChildren(); return panel.fallo(error, () => vistaSupervisor("revisiones")); }
+  const { enRevision, conDiferencias, sinEntrega } = datos;
+  const bloque = (titulo, n, ...hijos) => h("section", { class: "bloque" }, h("h2", {}, titulo, h("span", { class: "contador" }, numero(n))), ...hijos);
+  const cuandoYQuien = (f) => [f.operador, f.fechaFin && fechaHora(f.fechaFin)].filter(Boolean).join(" · ");
+  const pedidoTexto = (f) => `Pedido ${f.pedido.docNum ?? f.pedido.docEntry}${f.pedido.cliente ? ` · ${f.pedido.cliente}` : ""}`;
+
+  async function verResumen(f) {
+    mostrar(cargando("Cargando resumen…"));
+    try {
+      const [pedido, sesion] = await Promise.all([api.pedido(f.pedido.docEntry).then((r) => r.data), api.sesion(f.pickingId).then((r) => r.data)]);
+      vistaResumen(sesion, pedido, { texto: "Volver al panel", accion: () => vistaSupervisor("revisiones") });
+    } catch (error) { mostrarError(error, () => verResumen(f)); }
+  }
+  async function anular(r) {
+    const docNum = r.pedido.docNum ?? r.pedido.docEntry;
+    if (!(await confirmar({ titulo: r.pedidoAbierto ? `Reiniciar el pedido ${docNum}` : `Cerrar la revisión del pedido ${docNum}`,
+      aceptar: r.pedidoAbierto ? "Reiniciar" : "Cerrar la revisión",
+      texto: [r.pedidoAbierto ? "La preparación empieza de nuevo con el pedido actual de SAP. Las lecturas anteriores quedan en el historial."
+        : "SAP ya no tiene el pedido abierto. La preparación queda en el historial con sus lecturas."] }))) return;
+    try {
+      await api.anularRevision(r.pickingId);
+      panel.avisar("ok", r.pedidoAbierto ? `Listo: el pedido ${docNum} se puede volver a preparar.` : `Revisión del pedido ${docNum} cerrada.`);
+    } catch (error) { panel.fallo(error); }
+    await panel.refrescar();
+    await panelRevisiones(panel);
+  }
+
+  const tarjetaRevision = (r) => h("div", { class: "tarjeta revision" },
+    h("div", { class: "fila fila--entre" },
+      h("div", {}, h("span", { class: "rotulo" }, "Pedido"), h("div", { class: "revision__numero" }, String(r.pedido.docNum ?? r.pedido.docEntry)),
+        r.pedido.cliente && h("div", { class: "encabezado__sub" }, r.pedido.cliente)),
+      h("div", { class: "fila-admin__acciones" },
+        boton("", "lista", "Ver lecturas", { onclick: () => mostrarLecturas(r.pickingId) }),
+        boton("boton--principal", "actualizar", r.pedidoAbierto ? "Reiniciar con los datos nuevos" : "Cerrar la revisión", { onclick: () => anular(r) }))),
+    h("p", { class: "revision__texto" }, textoRevision(r)),
+    r.cambios.length > 0 && h("table", { class: "cambio" },
+      h("thead", {}, h("tr", {}, h("th", { scope: "col" }, "Producto"), h("th", { scope: "col" }, "Antes"), h("th", { scope: "col" }, "Ahora"))),
+      h("tbody", {}, r.cambios.map((c) => h("tr", {}, h("td", {}, c.itemName ?? c.itemCode), h("td", {}, c.antes === null ? "—" : numero(c.antes)),
+        h("td", { class: "cambio__nuevo" }, textoCambio(c)))))),
+    h("p", { class: "suave revision__nota" }, r.pedidoAbierto
+      ? "Al reiniciar, la preparación empieza de nuevo con el pedido actual. Las lecturas anteriores quedan en el historial."
+      : "Al cerrar la revisión, la preparación queda en el historial."));
+
+  const filaFinalizada = (f, extra) => filaAdmin({ clase: "fila-admin--alerta", nombre: pedidoTexto(f), detalle: [cuandoYQuien(f)],
+    dato: extra, acciones: [boton("", "siguiente", "Ver resumen", { onclick: () => verResumen(f) })] });
+
+  const nada = !enRevision.length && !conDiferencias.length && !sinEntrega.length;
+  panel.contenido.replaceChildren(
+    nada ? aviso("ok", "No hay nada para revisar.") : "",
+    enRevision.length ? bloque("En revisión", enRevision.length, ...enRevision.map(tarjetaRevision)) : "",
+    conDiferencias.length ? bloque("Finalizados con diferencias", conDiferencias.length,
+      h("ul", { class: "filas" }, conDiferencias.map((f) => filaFinalizada(f,
+        dato("Unidades", `${numero(f.unidadesPreparadas)} de ${numero(f.unidadesPedidas)} · faltaron ${numero(f.unidadesPedidas - f.unidadesPreparadas)}`))))) : "",
+    sinEntrega.length ? bloque("Preparados sin entrega en SAP (más de 24 h)", sinEntrega.length,
+      h("ul", { class: "filas" }, sinEntrega.map((f) => filaFinalizada(f, dato("Sin entrega hace", textoSinEntrega(f.horasSinEntrega)))))) : "");
+}
+
+async function panelSincronizacion(panel) {
+  let datos;
+  try { datos = (await api.sincronizacion()).data; } catch (error) { panel.contenido.replaceChildren(); return panel.fallo(error, () => vistaSupervisor("sincronizacion")); }
+  const pedidos = datos.entidades.find((e) => e.entidad === "pedidos");
+  const estadoPedidos = estadoDatos(pedidos);
+  const INSIGNIAS = { ok: ["ok", "completa"], alerta: ["alerta", "alerta"], sin_datos: ["gris", null] };
+  panel.contenido.replaceChildren(
+    estadoPedidos.tipo === "ok" ? aviso("ok", `El puente está enviando datos. Últimos pedidos de SAP ${hace(pedidos.ultimaRecepcion)}.`)
+      : estadoPedidos.tipo === "alerta" ? aviso("alerta", `Los últimos pedidos de SAP llegaron ${hace(pedidos.ultimaRecepcion)}. Revisá que el puente esté funcionando.`)
+        : aviso("alerta", "Todavía no llegaron datos de SAP."),
+    h("table", { class: "tabla" },
+      h("thead", {}, h("tr", {}, ["Datos de SAP", "Última recepción", "Registros", "Estado"].map((t) => h("th", { scope: "col" }, t)))),
+      h("tbody", {}, datos.entidades.map((e) => {
+        const s = estadoDatos(e);
+        return h("tr", {}, h("th", { scope: "row" }, NOMBRES_DATOS[e.entidad] ?? e.entidad),
+          h("td", {}, e.ultimaRecepcion ? hace(e.ultimaRecepcion) : "—"),
+          h("td", { class: "tabla__numero" }, e.entidad === "pedidos" ? `${numero(e.registros)} abiertos` : numero(e.registros)),
+          h("td", {}, insignia(INSIGNIAS[s.tipo][0], INSIGNIAS[s.tipo][1], s.texto)));
+      }))),
+    h("p", { class: "suave panel__nota" }, `${datos.empresa ? `Sociedad de SAP: ${datos.empresa}. ` : ""}Aviso si los pedidos pasan más de 1 hora sin datos, y el resto más de 24 horas. Los límites se ajustan cuando se definan las frecuencias del puente.`));
 }
 
 // ---------------------------------------------------------------------------

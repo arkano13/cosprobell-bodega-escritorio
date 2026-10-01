@@ -53,5 +53,20 @@ export function crearApi({ token, base = "", fetchImpl = (...args) => globalThis
     escaneos: (id, despuesDe = null) => pedir("GET", `/picking/${id}/escaneos?limit=100${despuesDe === null ? "" : `&despuesDe=${despuesDe}`}`),
     finalizar: (id) => pedir("POST", `/picking/${id}/finalizar`),
     cerrarSesion: () => pedir("DELETE", "/ingreso/sesion"),
+    // Panel del supervisor (solo con rol supervisor).
+    resumenSupervisor: () => pedir("GET", "/supervisor/resumen"),
+    etiquetasSupervisor: ({ estado, buscar = "", cursor = null }) => pedir("GET", `/supervisor/etiquetas?${new URLSearchParams({
+      estado, limit: "50", ...(buscar ? { buscar } : {}), ...(cursor === null ? {} : { cursor: String(cursor) }) })}`),
+    confirmarEtiqueta: (id, esUnidadIndividual) => pedir("PUT", `/supervisor/etiquetas/${id}/confirmacion`, { esUnidadIndividual }),
+    quitarConfirmacion: (id) => pedir("DELETE", `/supervisor/etiquetas/${id}/confirmacion`),
+    confirmarManual: (cantidadEsperada) => pedir("POST", "/supervisor/etiquetas/confirmacion-manual", { cantidadEsperada }),
+    operadoresSupervisor: () => pedir("GET", "/supervisor/operadores"),
+    crearOperador: (datos) => pedir("POST", "/supervisor/operadores", datos),
+    cambiarPin: (id, pin) => pedir("PUT", `/supervisor/operadores/${id}/pin`, { pin }),
+    desbloquear: (id) => pedir("POST", `/supervisor/operadores/${id}/desbloqueo`),
+    cambiarActivo: (id, activo) => pedir("PUT", `/supervisor/operadores/${id}/activo`, { activo }),
+    revisiones: () => pedir("GET", "/supervisor/revisiones"),
+    anularRevision: (pickingId) => pedir("POST", `/supervisor/revisiones/${pickingId}/anulacion`),
+    sincronizacion: () => pedir("GET", "/supervisor/sincronizacion"),
   };
 }
