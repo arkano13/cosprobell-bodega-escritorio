@@ -14,7 +14,8 @@ La pantalla viene dentro de la app: no se descarga de internet. Cómo funciona l
 
 ## Operadores y PIN
 
-- El supervisor da de alta a cada persona y le asigna su PIN desde el backend: `node scripts/operadores.js crear "Ana López" 4827`. También cambia PIN, desbloquea y desactiva (guía `docs/INGRESO_OPERADORES.md` del backend).
+- El supervisor da de alta a cada persona, le asigna su PIN, lo cambia, la desbloquea o la desactiva desde la app: **Menú → Panel del supervisor → Operadores** (ver [Panel del supervisor](#panel-del-supervisor)).
+- El primer supervisor se crea desde el backend: `node scripts/operadores.js crear "Nombre" PIN --supervisor`, o `node scripts/operadores.js rol "Nombre" supervisor` para alguien que ya existe (guía `docs/INGRESO_OPERADORES.md` del backend).
 - La sesión dura el turno (12 horas). **Menú → Cambiar de operador** la cierra para que ingrese otra persona; una preparación abierta se puede continuar.
 - Cada 5 PIN incorrectos seguidos la persona queda en pausa 15 minutos; a los 10, bloqueada hasta que el supervisor la desbloquee.
 - Queda registrado quién prepara cada pedido y quién hizo cada lectura.
@@ -34,6 +35,19 @@ La pantalla viene dentro de la app: no se descarga de internet. Cómo funciona l
 - Si se cierra la app a mitad de una preparación, al abrirla de nuevo continúa donde quedó (con la sesión del turno).
 - Si la sesión vence, la app vuelve a pedir el PIN; las lecturas que quedaron sin enviar se envían al volver a ingresar.
 - Solo se puede abrir una ventana: abrirla otra vez muestra la que ya está abierta.
+
+## Panel del supervisor
+
+Solo aparece en el **Menú** de quien ingresó con rol supervisor (la barra muestra **Supervisor: Nombre**). El backend también lo exige: a un operador le responde 403.
+
+| Pestaña | Para qué |
+|---|---|
+| Etiquetas | Confirmar si cada código de barras equivale a una unidad. Los de unidad **Manual** de SAP (la de Cosprobell) se confirman todos juntos con **Confirmar todos como unidad**; el resto, de a uno. Buscador que acepta una lectura del lector. Filtro **Cambiaron en SAP** para revisar de nuevo los que SAP modificó después de confirmarse. |
+| Operadores | Agregar personas, cambiar PIN (avisa si es fácil de adivinar), desbloquear, desactivar y activar. Cambiar el PIN o desactivar cierra las sesiones de esa persona. Nadie puede desactivarse a sí mismo. |
+| Revisiones | Preparaciones en revisión porque SAP cambió el pedido (qué producto cambió, antes y ahora): **Reiniciar con los datos nuevos** la anula y el pedido se vuelve a preparar; las lecturas quedan en el historial. También pedidos finalizados con diferencias (últimas 24 h) y preparados sin entrega en SAP hace más de 24 h. |
+| Sincronización | Cuándo llegaron por última vez pedidos, clientes, productos, unidades y códigos de barras desde el puente de SAP, con aviso si los pedidos pasan más de 1 hora sin datos o el resto más de 24 horas. |
+
+Los números junto a cada pestaña indican lo que espera atención.
 
 ## Actualizar o desinstalar
 

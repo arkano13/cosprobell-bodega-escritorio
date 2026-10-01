@@ -8,12 +8,23 @@ Pantalla para quien prepara los pedidos. Vive en `ui/` y la app de escritorio la
 2. **Pedidos abiertos**: número, cliente, fechas y hace cuánto llegaron los datos de SAP. Buscador por número o cliente.
    - Los pedidos ya preparados quedan abajo, en la sección **Preparados**: en verde ("Preparado") o en ámbar ("Preparado con diferencias"), con quién lo preparó, a qué hora y cuántas unidades. Tocarlos abre su resumen; no se puede empezar otra preparación.
    - Salen de la lista cuando SAP registra la entrega y cierra el pedido. No se quitan por tiempo: si pasan más de 24 horas sin cierre en SAP, muestran "Sin entrega en SAP hace N h" para revisar la entrega.
-3. **Detalle del pedido**: productos y cantidades pendientes. Si el pedido no se puede preparar (cerrado, cancelado, unidad "Manual", etc.), lo explica y no deja empezar.
+3. **Detalle del pedido**: productos y cantidades pendientes. Si el pedido no se puede preparar (cerrado, cancelado, sin unidad de medida, etc.), lo explica y no deja empezar. La unidad **Manual** de SAP (la que usa Cosprobell) cuenta como la unidad del artículo: cada lectura de un código confirmado como unidad suma 1.
 4. **Escaneo**: el panel del lector queda a la izquierda y las líneas a la derecha. Cada lectura responde en grande, en verde con ícono de aceptada (producto y cuántas lleva) o en rojo con ícono de rechazada (motivo), con sonido distinto. Las líneas pendientes quedan arriba; las completas, en verde al final.
 5. **Ver lecturas**: historial de la preparación (aceptadas y rechazadas).
 6. **Finalizar**: si faltan productos, muestra cuáles y pide confirmar "Finalizar con diferencias". Al terminar, un resumen con estado, unidades preparadas, líneas completas, operador y horas de inicio y fin.
 
 Si se sale de una preparación sin finalizarla, la lista ofrece **Continuar** donde quedó.
+
+Si SAP cambia el pedido mientras se prepara, la preparación queda **en revisión**: la pantalla deja de aceptar lecturas y pide avisar al supervisor. Cuando el supervisor la reinicia desde su panel, quien la tenía abierta ve "El supervisor reinició la preparación del pedido N…" y la empieza de nuevo desde la lista, con el pedido actual.
+
+## Panel del supervisor
+
+Solo para quien ingresó con rol supervisor (**Menú → Panel del supervisor**). Cuatro pestañas, cada una con un número de lo que espera atención:
+
+- **Etiquetas**: códigos de barras por confirmar como unidad. Los de unidad Manual se confirman todos juntos; si mientras tanto llega uno nuevo, el servidor lo rechaza y la pantalla pide revisar otra vez. Buscador que acepta una lectura del lector y filtro **Cambiaron en SAP**.
+- **Operadores**: agregar, cambiar PIN (con repetición y aviso de PIN fácil), desbloquear, desactivar y activar.
+- **Revisiones**: preparaciones en revisión con lo que cambió en SAP (antes y ahora) y **Reiniciar con los datos nuevos**; finalizados con diferencias de las últimas 24 h; preparados sin entrega en SAP hace más de 24 h. Desde cada uno se ven las lecturas o el resumen.
+- **Sincronización**: última recepción y cantidad de registros por tipo de dato de SAP. Aviso si los pedidos pasan más de 1 h sin datos o el resto más de 24 h.
 
 ## El lector de códigos
 
@@ -37,6 +48,5 @@ Identidad de Cosprobell en tono formal: morado de referencia (**#362F44**) en la
 
 ## Pendiente (reglas de Cosprobell)
 
-- Qué hacer con una preparación en `requiere_revision`: hoy la pantalla la bloquea y pide avisar al supervisor.
-- Cuánto tiempo sin actualizar se acepta: hoy solo avisa si los datos del pedido tienen más de una hora.
+- Cuánto tiempo sin actualizar se acepta: hoy avisa si los datos del pedido tienen más de una hora; los límites del panel se ajustan cuando se definan las frecuencias del puente.
 - Quién puede finalizar con diferencias: hoy cualquier equipo con clave puede hacerlo.

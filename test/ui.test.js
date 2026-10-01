@@ -4,6 +4,7 @@ import { crearApi, ErrorApi } from "../ui/js/api.js";
 import { crearColaLecturas } from "../ui/js/lecturas.js";
 import { nuevoUuid } from "../ui/js/uuid.js";
 import { HORAS_SIN_ENTREGA, textosPreparado } from "../ui/js/preparados.js";
+import { estadoDatos, estadoOperador, puedeSerUnidad, quienConfirmo, textoCambio, textoRevision, textoSinEntrega, textoUnidad } from "../ui/js/supervisor.js";
 
 const sinEspera = async () => {};
 const temporal = () => new ErrorApi({ mensaje: "Sin conexión con el servidor", temporal: true });
@@ -140,4 +141,45 @@ test("preparados: estado, quién y cuándo, unidades y aviso sin entrega en SAP"
   assert.equal(sinDatos.unidades, "5 de 6 unidades · faltó 1");
   assert.equal(sinDatos.aviso, null);
   assert.equal(textosPreparado({ ...base, unidadesPreparadas: 1, unidadesPedidas: 1, fechaFin: null }, ahora).unidades, "1 de 1 unidad");
+});
+
+test("supervisor: estado de los datos de SAP (pedidos 1 h, resto 24 h)", () => {
+  const ahora = Date.parse("2026-10-02T12:00:00Z");
+  const hace = (min) => new Date(ahora - min * 60000).toISOString();
+  assert.equal(estadoDatos({ entidad: "pedidos", ultimaRecepcion: hace(59) }, ahora).tipo, "ok");
+  assert.deepEqual(estadoDatos({ entidad: "pedidos", ultimaRecepcion: hace(61) }, ahora), { tipo: "alerta", texto: "Más de 1 h sin datos" });
+  assert.equal(estadoDatos({ entidad: "clientes", ultimaRecepcion: hace(23 * 60) }, ahora).tipo, "ok");
+  assert.deepEqual(estadoDatos({ entidad: "codigosBarras", ultimaRecepcion: hace(25 * 60) }, ahora), { tipo: "alerta", texto: "Más de 24 h sin datos" });
+  assert.equal(estadoDatos({ entidad: "unidades", ultimaRecepcion: null }, ahora).tipo, "sin_datos");
+});
+
+test("supervisor: unidad de una etiqueta, Manual se puede confirmar y quién confirmó", () => {
+  assert.equal(textoUnidad({ unidad: { code: "CJ6", nombre: "Caja de 6" }, uomEntry: 3 }), "CJ6 · Caja de 6");
+  assert.equal(textoUnidad({ unidad: null, uomEntry: -1 }), "Manual (unidad del artículo)");
+  assert.equal(textoUnidad({ unidad: null, uomEntry: null }), "Sin unidad en SAP");
+  assert.deepEqual([-1, 0, 5, null, -2, undefined].map((uomEntry) => puedeSerUnidad({ uomEntry })), [true, true, true, false, false, false]);
+  assert.equal(quienConfirmo("operador:Carmen Díaz"), "Carmen Díaz");
+  assert.equal(quienConfirmo("supervisor-etiquetas"), "supervisor-etiquetas");
+  assert.equal(quienConfirmo(null), "otra aplicación");
+});
+
+test("supervisor: estado de cada operador", () => {
+  assert.deepEqual(estadoOperador({ estado: "activo", intentosFallidos: 0 }), { tipo: "ok", texto: "Activo", detalle: "" });
+  assert.equal(estadoOperador({ estado: "bloqueado", intentosFallidos: 10 }).detalle, "10 PIN incorrectos seguidos");
+  const pausa = estadoOperador({ estado: "pausa", intentosFallidos: 5, pausaHasta: new Date(2026, 9, 2, 10, 42).toISOString() });
+  assert.equal(pausa.tipo, "alerta"); assert.match(pausa.texto, /^En pausa hasta 10:42/);
+  assert.equal(estadoOperador({ estado: "inactivo" }).texto, "Inactivo");
+});
+
+test("supervisor: textos de revisiones", () => {
+  const base = { unidadesPreparadas: 5, unidadesPedidas: 14 };
+  assert.equal(textoRevision({ ...base, motivo: "CAMBIOS_EN_SAP", operador: "Ana López" }),
+    "SAP cambió el pedido mientras Ana López lo preparaba (llevaba 5 de 14 unidades).");
+  assert.equal(textoRevision({ ...base, motivo: "CAMBIOS_EN_SAP", operador: null }), "SAP cambió el pedido mientras se preparaba (llevaba 5 de 14 unidades).");
+  assert.equal(textoRevision({ ...base, motivo: "PEDIDO_CERRADO", mensaje: "El pedido está cerrado" }), "El pedido está cerrado");
+  assert.equal(textoCambio({ antes: 2, ahora: null }), "Quitado del pedido");
+  assert.equal(textoCambio({ antes: null, ahora: 5 }), "Agregado: 5");
+  assert.equal(textoCambio({ antes: 4, ahora: 6 }), "6");
+  assert.equal(textoSinEntrega(26), "26 h");
+  assert.equal(textoSinEntrega(75), "3 días");
 });
