@@ -15,6 +15,9 @@ const UI = path.join(RAIZ, "ui");
 // Solo para pruebas: carpeta de datos separada, así no se mezcla con la del equipo.
 if (!app.isPackaged && process.env.BODEGA_DATOS) app.setPath("userData", process.env.BODEGA_DATOS);
 
+// Controles del sistema (mes y año del vencimiento, diálogo de impresión) en español.
+app.commandLine.appendSwitch("lang", "es-419");
+
 protocol.registerSchemesAsPrivileged([
   { scheme: "app", privileges: { standard: true, secure: true, supportFetchAPI: true } },
 ]);
@@ -70,6 +73,13 @@ async function iniciar() {
     validarRemitente(evento);
     if (!datosIngresoValidos(datos)) return { ok: false, status: 400, codigo: "DATOS_INVALIDOS", mensaje: "Elegí tu nombre y escribí un PIN de 4 números" };
     return ingreso.iniciar(datos);
+  });
+  // Etiquetas de las cajas: abre el diálogo de impresión de Windows con lo que la página dejó para imprimir.
+  ipcMain.handle("imprimir", (evento) => {
+    validarRemitente(evento);
+    return new Promise((resolver) => {
+      evento.sender.print({ printBackground: true }, (ok, motivo) => resolver({ ok, motivo: ok ? null : String(motivo ?? "") }));
+    });
   });
   ipcMain.handle("preferencias:guardar", (evento, cambios) => {
     validarRemitente(evento);

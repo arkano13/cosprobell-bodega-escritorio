@@ -68,5 +68,26 @@ export function crearApi({ token, base = "", fetchImpl = (...args) => globalThis
     revisiones: () => pedir("GET", "/supervisor/revisiones"),
     anularRevision: (pickingId) => pedir("POST", `/supervisor/revisiones/${pickingId}/anulacion`),
     sincronizacion: () => pedir("GET", "/supervisor/sincronizacion"),
+    almacenes: () => pedir("GET", "/supervisor/almacenes"),
+    elegirAlmacenes: (almacenes, pedidosSoloDeEstaBodega) => pedir("PUT", "/supervisor/almacenes", { almacenes, pedidosSoloDeEstaBodega }),
+    registrarCodigo: (codigo, itemCode) => pedir("POST", "/supervisor/codigos", { codigo, itemCode }),
+    // Inventario de las dos bodegas.
+    inventario: () => pedir("GET", "/inventario/resumen"),
+    buscarProductos: (buscar) => pedir("GET", `/inventario/productos?${new URLSearchParams({ buscar, limit: "20" })}`),
+    producto: (itemCode) => pedir("GET", `/inventario/productos/${encodeURIComponent(itemCode)}`),
+    pendientes: () => pedir("GET", "/inventario/pendientes"),
+    conteoInicial: ({ buscar = "", pagina = 0 } = {}) => pedir("GET", `/inventario/pendientes/inicial?${new URLSearchParams({
+      pagina: String(pagina), limit: "50", ...(buscar ? { buscar } : {}) })}`),
+    caja: (codigo) => pedir("GET", `/inventario/cajas/${encodeURIComponent(codigo)}`),
+    porVencer: (dias) => pedir("GET", `/inventario/por-vencer?dias=${dias}`),
+    movimientos: ({ itemCode = null, antesDe = null } = {}) => pedir("GET", `/inventario/movimientos?${new URLSearchParams({
+      limit: "30", ...(itemCode ? { itemCode } : {}), ...(antesDe === null ? {} : { antesDe: String(antesDe) }) })}`),
+    descuentos: (antesDe = null) => pedir("GET", `/inventario/descuentos?limit=30${antesDe === null ? "" : `&antesDe=${antesDe}`}`),
+    recibir: (datos) => pedir("POST", "/inventario/recepciones", datos),
+    reponer: (caja, unidades) => pedir("POST", "/inventario/reposiciones", { caja, unidades }),
+    descontar: (itemCode, unidades, asignaciones) => pedir("POST", "/inventario/descuentos", { itemCode, unidades, asignaciones }),
+    cambiarLote: (id, asignaciones) => pedir("POST", `/inventario/descuentos/${id}/reasignacion`, { asignaciones }),
+    contarPequena: (itemCode, unidades) => pedir("PUT", `/inventario/productos/${encodeURIComponent(itemCode)}/pequena`, { unidades }),
+    corregirCaja: (id, unidades) => pedir("PUT", `/inventario/cajas/${id}/unidades`, { unidades }),
   };
 }

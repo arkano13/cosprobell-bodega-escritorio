@@ -584,3 +584,184 @@ h2 {
   .fila-admin { grid-template-columns: minmax(0, 1fr); }
   .fila-admin__acciones { justify-content: flex-start; }
 }
+
+/* ---------- Secciones principales ---------- */
+.secciones { display: flex; flex-wrap: wrap; gap: 6px; margin: -6px 0 22px; border-bottom: 2px solid var(--linea); }
+.seccion {
+  display: inline-flex; align-items: center; gap: 8px; min-height: 52px; padding: 10px 16px; margin-bottom: -2px;
+  background: none; border: 0; border-bottom: 3px solid transparent; color: var(--tinta-suave);
+  font-size: 18px; font-weight: 700; cursor: pointer;
+}
+.seccion:hover { color: var(--tinta); background: var(--lila-claro); }
+.seccion[aria-current="page"] { color: var(--tinta); border-bottom-color: var(--accion); }
+.seccion .contador { height: 26px; min-width: 28px; font-size: 16px; }
+
+.aviso--info { background: var(--lila-claro); color: var(--tinta); border-color: var(--lila-fuerte); border-left-color: var(--accion); }
+.nota { display: flex; align-items: center; gap: 8px; margin: -6px 0 18px; font-size: 15px; font-weight: 600; }
+.nota .icono { width: 18px; height: 18px; flex: none; }
+.titulo-seccion { margin: 6px 0 12px; }
+.titulo-seccion h2 { margin: 0; }
+.enlace { padding: 0; background: none; border: 0; color: var(--accion); font-weight: 700; text-align: left; text-decoration: underline;
+  text-underline-offset: 3px; cursor: pointer; }
+.enlace:hover { color: var(--accion-hover); }
+.codigo--barras { background: var(--lila-claro) !important; }
+
+/* ---------- Inventario: inicio ---------- */
+.lector { margin-bottom: 20px; }
+.lector__ayuda { margin: 10px 0 0; font-size: 14px; color: var(--lila-texto); }
+.acciones-inventario { display: grid; gap: 16px; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); margin-bottom: 20px; }
+.accion-inventario {
+  display: grid; gap: 6px; align-content: start; min-height: 150px; padding: 20px 22px; text-align: left; cursor: pointer;
+  background: var(--superficie); border: 1px solid var(--linea); border-left: 6px solid var(--accion); border-radius: var(--radio);
+  box-shadow: var(--sombra); transition: border-color var(--rapido) ease-out, box-shadow var(--rapido) ease-out;
+}
+.accion-inventario .icono { width: 30px; height: 30px; color: var(--accion); }
+.accion-inventario strong { font-family: var(--letra-titulo); font-size: 24px; letter-spacing: 0.03em; text-transform: uppercase; }
+.accion-inventario span { color: var(--tinta-suave); font-size: 16px; }
+.accion-inventario:hover:not(:disabled) { border-color: var(--accion); box-shadow: var(--sombra-media); }
+.accion-inventario:active:not(:disabled) { background: var(--lila-claro); }
+.accion-inventario:disabled { opacity: 0.5; cursor: not-allowed; }
+
+.pendientes { display: grid; gap: 12px; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); margin-bottom: 20px; }
+.pendiente {
+  display: grid; gap: 2px; padding: 14px 16px; text-align: left; cursor: pointer;
+  background: var(--superficie); border: 1px solid var(--linea); border-top: 5px solid var(--ok); border-radius: var(--radio); box-shadow: var(--sombra);
+}
+.pendiente:hover { box-shadow: var(--sombra-media); border-color: var(--borde-control); }
+.pendiente__cabeza { display: inline-flex; align-items: center; gap: 8px; font-family: var(--letra-titulo); font-size: 17px; font-weight: 700;
+  letter-spacing: 0.08em; text-transform: uppercase; }
+.pendiente__cabeza .icono { width: 20px; height: 20px; }
+.pendiente__n { font-family: var(--letra-titulo); font-size: 40px; font-weight: 800; line-height: 1.05; font-variant-numeric: tabular-nums; }
+.pendiente__texto { font-size: 14px; color: var(--tinta-suave); }
+.pendiente--alerta { border-top-color: var(--alerta); background: var(--alerta-fondo); }
+.pendiente--alerta .pendiente__n { color: var(--alerta-texto); }
+.pendiente--error { border-top-color: var(--error); background: var(--error-fondo); }
+.pendiente--error .pendiente__n { color: var(--error); }
+.pendiente--gris { border-top-color: var(--borde-control); }
+
+.bodegas { display: grid; gap: 16px; grid-template-columns: repeat(auto-fit, minmax(320px, 1fr)); }
+.bodega h2 { display: flex; align-items: center; gap: 10px; }
+.bodega h2 .icono { width: 24px; height: 24px; color: var(--accion); }
+.cifras { display: flex; flex-wrap: wrap; gap: 8px 28px; }
+.cifra { display: grid; }
+.cifra strong { font-family: var(--letra-titulo); font-size: 38px; font-weight: 800; line-height: 1; font-variant-numeric: tabular-nums; }
+.cifra span { font-size: 15px; color: var(--tinta-suave); font-weight: 600; }
+
+.tabla-envoltura { overflow-x: auto; margin-bottom: 20px; border-radius: var(--radio); }
+.tabla-envoltura .tabla { margin: 0; }
+.tabla .tabla__numero { text-align: right; }
+.tabla__fecha { white-space: nowrap; font-variant-numeric: tabular-nums; }
+.movimiento { display: inline-flex; align-items: center; gap: 6px; font-weight: 700; }
+.movimiento .icono { width: 18px; height: 18px; color: var(--accion); }
+.movimiento__nota { display: block; margin-top: 2px; font-size: 13px; color: var(--tinta-suave); }
+.fila--vencida td { background: var(--error-fondo); }
+.fila--marcada > * { background: var(--lila-claro); }
+.tabla__casilla { width: 120px; }
+.tabla__casilla input, .opcion--tarjeta input { width: 26px; height: 26px; accent-color: var(--accion); cursor: pointer; }
+.tabla--almacenes label { cursor: pointer; }
+.opcion--tarjeta { margin: 4px 0 16px; padding: 14px 18px; }
+
+/* ---------- Producto y caja ---------- */
+.estado-producto { border-left: 6px solid var(--accion); }
+.estado-producto--ok { border-left-color: var(--ok); }
+.estado-producto--alerta { border-left-color: var(--alerta); }
+.estado-producto--gris { border-left-color: var(--borde-control); }
+.estado-producto .insignia { margin-top: 6px; }
+.estado-producto__texto { margin: 12px 0 0; font-size: 18px; font-weight: 600; }
+.cifra-grande { margin: 0 0 12px; font-size: 18px; font-weight: 600; }
+.cifra-grande strong { font-family: var(--letra-titulo); font-size: 40px; font-weight: 800; }
+.cajas-lote { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px; }
+.chip-caja {
+  display: inline-flex; align-items: center; gap: 8px; min-height: 36px; padding: 4px 10px; cursor: pointer;
+  background: var(--superficie); color: var(--tinta); border: 1.5px solid var(--borde-control); border-radius: var(--radio-chico);
+  font-family: var(--letra-codigo); font-size: 14px; font-weight: 700;
+}
+.chip-caja span { font-family: var(--letra); font-weight: 600; color: var(--tinta-suave); }
+.chip-caja:hover { background: var(--lila-claro); border-color: var(--tinta); }
+.chip-caja--abierta { border-style: dashed; }
+.codigos, .documentos { display: grid; gap: 8px; margin: 0; padding: 0; list-style: none; }
+.codigos li { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 14px; padding: 10px 14px;
+  background: var(--superficie); border: 1px solid var(--linea); border-radius: var(--radio-chico); }
+.codigos .codigo { font-size: 17px; }
+.documentos li { display: flex; flex-wrap: wrap; gap: 4px 14px; padding: 10px 14px;
+  background: var(--superficie); border: 1px solid var(--linea); border-radius: var(--radio-chico); }
+.codigo-titulo { font-family: var(--letra-codigo); letter-spacing: 0.02em; text-transform: none; }
+.caja-layout { display: grid; gap: 20px; grid-template-columns: minmax(300px, 420px) minmax(0, 1fr); align-items: start; }
+.caja-layout .tarjeta { margin: 0; }
+.caja-layout .etiqueta-caja { margin: 10px 0 14px; }
+.caja-layout .datos { margin-top: 0; padding-top: 0; border-top: 0; }
+.formulario-reponer { margin: 18px 0; }
+.campo--numero { max-width: 220px; font-family: var(--letra-titulo); font-size: 24px; font-weight: 700; font-variant-numeric: tabular-nums; }
+
+/* ---------- Recepción ---------- */
+.formulario-recepcion h2 { margin-bottom: 10px; }
+.segmentos { display: inline-flex; margin: 0 0 18px; border: 1.5px solid var(--borde-control); border-radius: var(--radio-chico); overflow: hidden; }
+.segmento {
+  display: inline-flex; align-items: center; gap: 8px; min-height: 52px; padding: 10px 20px; cursor: pointer;
+  background: var(--superficie); color: var(--tinta); border: 0; font-size: 17px; font-weight: 700;
+}
+.segmento + .segmento { border-left: 1.5px solid var(--borde-control); }
+.segmento:hover { background: var(--lila-claro); }
+.segmento[aria-pressed="true"] { background: var(--tinta); color: #fff; }
+.rejilla-campos { display: grid; gap: 0 18px; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); }
+.rejilla-campos .campo--numero { max-width: none; }
+.destino { margin: 0 0 14px; padding: 8px 14px 10px; border: 1px solid var(--linea); border-radius: var(--radio-chico); }
+.destino legend { padding: 0 6px; font-weight: 700; }
+.destino input { width: 22px; height: 22px; margin: 0; flex: none; accent-color: var(--accion); }
+.resumen-recepcion:empty { display: none; }
+
+/* ---------- Etiquetas de cajas ---------- */
+.etiquetas { display: grid; gap: 16px; grid-template-columns: repeat(auto-fill, minmax(320px, 1fr)); margin-top: 8px; }
+.etiqueta-caja {
+  display: grid; gap: 2px; padding: 14px 16px; background: #fff; color: #000;
+  border: 2px solid #000; border-radius: 6px; break-inside: avoid;
+}
+.etiqueta__nombre { margin-bottom: 6px; font-size: 18px; font-weight: 700; line-height: 1.2; overflow-wrap: anywhere; }
+.etiqueta__fila { display: grid; grid-template-columns: 86px minmax(0, 1fr); gap: 8px; font-size: 15px; font-weight: 600; }
+.etiqueta__rotulo { font-family: var(--letra-titulo); font-size: 13px; font-weight: 700; letter-spacing: 0.12em; text-transform: uppercase; }
+.etiqueta__codigo { display: grid; justify-items: center; gap: 2px; margin-top: 10px; }
+.etiqueta__barras { width: 100%; max-width: 330px; height: 64px; fill: #000; }
+.etiqueta__codigo .codigo { font-size: 16px; font-weight: 700; letter-spacing: 0.12em; }
+
+/* Solo las etiquetas salen en la impresión. */
+.impresion { display: none; }
+@media print {
+  @page { margin: 8mm; }
+  body { background: #fff; }
+  body > :not(.impresion) { display: none !important; }
+  .impresion { display: block; }
+  .impresion .etiqueta-caja { width: 90mm; margin: 0 0 6mm; page-break-inside: avoid; break-inside: avoid; }
+  .impresion .etiqueta__barras { max-width: none; height: 16mm; }
+}
+
+/* ---------- Descuentos ---------- */
+.opciones-lote { display: grid; gap: 10px; margin: 0 0 16px; padding: 0; list-style: none; }
+.opcion-lote {
+  display: grid; grid-template-columns: minmax(0, 1fr) 110px 190px; gap: 8px 18px; align-items: center;
+  padding: 14px 18px; background: var(--superficie); border: 1.5px solid var(--linea); border-radius: var(--radio);
+}
+.opcion-lote:focus-within { border-color: var(--accion); box-shadow: 0 0 0 3px var(--lila); }
+.opcion-lote--vencida { background: var(--error-fondo); border-color: var(--error-borde); }
+.opcion-lote__nombre { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 10px; font-size: 18px; font-weight: 700; }
+.opcion-lote__disponible { display: grid; justify-items: end; }
+.opcion-lote__disponible strong { font-family: var(--letra-titulo); font-size: 30px; font-weight: 800; line-height: 1; }
+.opcion-lote__disponible span { font-size: 13px; color: var(--tinta-suave); }
+.opcion-lote__campo { display: grid; gap: 4px; font-size: 14px; font-weight: 700; }
+.opcion-lote__campo .campo--numero { max-width: none; }
+
+/* ---------- Registrar un código ---------- */
+.resultados-producto { display: grid; gap: 6px; max-height: 240px; margin: -6px 0 12px; padding: 0; overflow-y: auto; list-style: none; }
+.resultado-producto {
+  display: grid; width: 100%; padding: 10px 12px; text-align: left; cursor: pointer;
+  background: var(--superficie); color: var(--tinta); border: 1.5px solid var(--linea); border-radius: var(--radio-chico);
+}
+.resultado-producto:hover { border-color: var(--borde-control); background: var(--lila-claro); }
+.resultado-producto[aria-pressed="true"] { border-color: var(--accion); background: var(--lila); }
+.registro__elegido { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; font-weight: 600; }
+.registro__elegido .icono { color: var(--ok); }
+
+@media (max-width: 900px) {
+  .caja-layout { grid-template-columns: minmax(0, 1fr); }
+  .opcion-lote { grid-template-columns: minmax(0, 1fr) 100px; }
+  .opcion-lote__campo { grid-column: 1 / -1; }
+}

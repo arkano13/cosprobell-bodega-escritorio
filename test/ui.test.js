@@ -183,3 +183,81 @@ test("supervisor: textos de revisiones", () => {
   assert.equal(textoSinEntrega(26), "26 h");
   assert.equal(textoSinEntrega(75), "3 días");
 });
+
+import { PATRONES, simbolos, anchos, barras, MARGEN } from "../ui/js/code128.js";
+import { ESTADOS, armarAsignaciones, cantidadMovimiento, diasParaVencer, esCodigoCaja, finDeMes, opcionesDescuento, quien, resumenRecepcion,
+  sugerirAsignacion, textoAsignacion, textoDocumento, textoEstado, textoMovimiento, textoPorVencer, textoVencimiento } from "../ui/js/inventario.js";
+
+test("code128: cada símbolo mide 11 módulos (el fin 13), sin repetidos, y el dígito de control es el del estándar", () => {
+  assert.equal(PATRONES.length, 107);
+  PATRONES.forEach((p, i) => assert.equal([...p].reduce((s, n) => s + Number(n), 0), i === 106 ? 13 : 11, `símbolo ${i}`));
+  assert.equal(new Set(PATRONES).size, 107);
+  // Inicio B (104), los caracteres y el control: (104 + Σ valor × posición) mod 103.
+  assert.deepEqual(simbolos("CJ-1"), [104, 35, 42, 13, 17, 21, 106]);
+  const { barras: lista, modulos } = barras("CJ-000123");
+  assert.equal(modulos, MARGEN * 2 + (1 + 9 + 1) * 11 + 13);
+  assert.equal(lista[0].x, MARGEN);
+  assert.equal(anchos("CJ-000123").length, (1 + 9 + 1) * 6 + 7);
+  assert.throws(() => simbolos("ñ"), /letras, números/);
+  assert.throws(() => simbolos(""), /letras, números/);
+});
+
+test("inventario: vencimiento por mes y año, días para vencer y código de caja", () => {
+  assert.equal(finDeMes("2027-02"), "2027-02-28");
+  assert.equal(finDeMes("2028-02"), "2028-02-29");
+  assert.equal(finDeMes("2027-13"), null);
+  assert.equal(textoVencimiento("2027-03-31"), "03/2027");
+  assert.equal(textoVencimiento("2027-03-15"), "15/3/2027");
+  assert.equal(textoVencimiento(null), "Sin vencimiento");
+  assert.equal(diasParaVencer("2026-10-11", new Date(2026, 9, 1, 23, 50)), 10);
+  assert.equal(diasParaVencer("2026-09-30", new Date(2026, 9, 1)), -1);
+  assert.ok(esCodigoCaja(" cj-000123 ") && !esCodigoCaja("7401234567890") && !esCodigoCaja("CJ-12"));
+});
+
+test("inventario: textos del estado frente a SAP, movimientos y documentos", () => {
+  assert.equal(ESTADOS.por_descontar.tipo, "alerta");
+  assert.equal(textoEstado({ estado: "por_ubicar", diferencia: 100, faltaEnSap: 0 }), "SAP tiene 100 unidades que todavía no se ubicaron.");
+  assert.equal(textoEstado({ estado: "por_descontar", diferencia: -1, faltaEnSap: 0 }), "SAP descontó 1 unidad: falta elegir de qué lote salieron.");
+  assert.equal(textoEstado({ estado: "al_dia", diferencia: 0, faltaEnSap: 20 }), "Cuadra. 20 unidades se recibieron antes que SAP las registre.");
+  assert.match(textoEstado(null), /almacenes/);
+  assert.equal(textoMovimiento({ tipo: "picking", docNum: 91004 }), "Salida por pedido 91004");
+  assert.equal(cantidadMovimiento({ tipo: "reposicion", grande: -24, pequena: 24 }), "24 u. a la pequeña");
+  assert.equal(cantidadMovimiento({ tipo: "recepcion", grande: 1000, pequena: 0, cajas: 50 }), "50 cajas · 1,000 u.");
+  assert.equal(cantidadMovimiento({ tipo: "picking", grande: 0, pequena: -6, cajas: 0 }), "-6 u.");
+  assert.equal(cantidadMovimiento({ tipo: "reasignacion", grande: 20, pequena: -20, cajas: 1 }), "No cambia el total");
+  assert.equal(textoPorVencer({ vencidos: 1, proximos: 0 }), "1 lote vencido");
+  assert.equal(textoPorVencer({ vencidos: 2, proximos: 1 }), "2 lotes vencidos y 1 vence en 60 días");
+  assert.equal(textoPorVencer({ vencidos: 0, proximos: 0 }), "ningún lote vence en 60 días");
+  assert.equal(quien("operador:Ana López"), "Ana López");
+  assert.equal(textoDocumento({ tipo: "salidaInventario", docNum: 1377 }), "Salida de mercancías 1377");
+});
+
+test("inventario: resumen de una recepción en cajas o suelta", () => {
+  assert.deepEqual(resumenRecepcion({ modo: "cajas", cajas: 5, unidadesPorCaja: 20, lote: "L2410-033" }),
+    { total: 100, texto: "Entran 5 cajas · 100 unidades del lote L2410-033 a la bodega grande." });
+  assert.equal(resumenRecepcion({ modo: "suelto", unidades: 1, destino: "pequena" }).texto, "Entran 1 unidad sueltas a la bodega pequeña.");
+  assert.equal(resumenRecepcion({ modo: "cajas", cajas: 0, unidadesPorCaja: 20 }).total, 0);
+});
+
+test("inventario: opciones para descontar, vencidos primero; propuesta y validación de la asignación", () => {
+  const hoy = new Date(2026, 9, 1);
+  const producto = { pequena: 30, lotes: [
+    { lote: "L2409-118", vencimiento: "2027-03-31", unidades: 180, cajas: [{}, {}] },
+    { lote: "L2408-090", vencimiento: "2026-09-30", unidades: 100, cajas: [{}] },
+    { lote: null, vencimiento: null, unidades: 4, cajas: [{}] },
+  ] };
+  const opciones = opcionesDescuento(producto, [], hoy);
+  assert.deepEqual(opciones.map((o) => [o.clave, o.unidades, o.vencido]),
+    [["lote:L2408-090", 100, true], ["lote:L2409-118", 180, false], ["lote:", 4, false], ["pequena", 30, false]]);
+  const propuesta = sugerirAsignacion(opciones, 120);
+  assert.deepEqual(propuesta, { "lote:L2408-090": 100, "lote:L2409-118": 20, "lote:": 0, pequena: 0 });
+  assert.deepEqual(armarAsignaciones(opciones, propuesta, 120).asignaciones,
+    [{ tipo: "lote", lote: "L2408-090", unidades: 100 }, { tipo: "lote", lote: "L2409-118", unidades: 20 }]);
+  assert.match(armarAsignaciones(opciones, { ...propuesta, pequena: 5 }, 120).problema, /Asignaste 125 de 120/);
+  assert.match(armarAsignaciones(opciones, { pequena: 31 }, 31).problema, /La bodega pequeña tiene 30 unidades/);
+  assert.match(armarAsignaciones(opciones, { "lote:L2408-090": 1.5 }, 1.5).problema, /enteros/);
+  // Cambiar el lote: lo que el descuento ya restó vuelve a estar disponible, aunque el lote haya quedado vacío.
+  const cambio = opcionesDescuento({ pequena: 0, lotes: [] }, [{ tipo: "lote", lote: "L1", unidades: 35 }, { tipo: "pequena", unidades: 5 }], hoy);
+  assert.deepEqual(cambio.map((o) => [o.clave, o.unidades]), [["lote:L1", 35], ["pequena", 5]]);
+  assert.equal(textoAsignacion([{ tipo: "lote", lote: "L1", unidades: 1000 }, { tipo: "pequena", unidades: 5 }]), "L1: 1,000 · pequeña: 5");
+});
