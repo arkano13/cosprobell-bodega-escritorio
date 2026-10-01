@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import { crearApi, ErrorApi } from "../ui/js/api.js";
 import { crearColaLecturas } from "../ui/js/lecturas.js";
 import { nuevoUuid } from "../ui/js/uuid.js";
-import { HORAS_SIN_ENTREGA, textosPreparado } from "../ui/js/preparados.js";
+import { HORAS_EN_LISTA, sigueEnLista, textosPreparado } from "../ui/js/preparados.js";
 import { estadoDatos, estadoOperador, puedeSerUnidad, quienConfirmo, textoCambio, textoRevision, textoSinEntrega, textoUnidad } from "../ui/js/supervisor.js";
 
 const sinEspera = async () => {};
@@ -112,7 +112,7 @@ test("api: usa la dirección del servidor como base", async () => {
   assert.deepEqual([urls[2], envios[2].method], ["https://bodega.ejemplo.com/ingreso/sesion", "DELETE"]);
 });
 
-test("preparados: estado, quién y cuándo, unidades y aviso sin entrega en SAP", () => {
+test("preparados: estado, quién y cuándo, unidades y salida de la lista a las 24 h", () => {
   const ahora = new Date(2026, 8, 30, 12, 0).getTime();
   const hoy = textosPreparado({ estado: "completo", operador: "Ana López", fechaFin: new Date(2026, 8, 30, 9, 15).toISOString(),
     unidadesPreparadas: 14, unidadesPedidas: 14 }, ahora);
@@ -120,7 +120,6 @@ test("preparados: estado, quién y cuándo, unidades y aviso sin entrega en SAP"
   assert.equal(hoy.estado, "Preparado");
   assert.match(hoy.quien, /^Preparado por Ana López · 9:15/);
   assert.equal(hoy.unidades, "14 de 14 unidades");
-  assert.equal(hoy.aviso, null);
 
   const ayer = textosPreparado({ estado: "con_diferencias", operador: "Luis Pérez", fechaFin: new Date(2026, 8, 29, 13, 48).toISOString(),
     unidadesPreparadas: 9, unidadesPedidas: 11 }, ahora);
@@ -128,18 +127,19 @@ test("preparados: estado, quién y cuándo, unidades y aviso sin entrega en SAP"
   assert.equal(ayer.estado, "Preparado con diferencias");
   assert.match(ayer.quien, /^Preparado por Luis Pérez · ayer 1:48/);
   assert.equal(ayer.unidades, "9 de 11 unidades · faltaron 2");
-  assert.equal(ayer.aviso, null, "menos de 24 h: sin aviso");
 
   const hora = 3_600_000;
   const base = { estado: "con_diferencias", operador: null, unidadesPreparadas: 5, unidadesPedidas: 6 };
-  assert.equal(HORAS_SIN_ENTREGA, 24);
-  assert.equal(textosPreparado({ ...base, fechaFin: new Date(ahora - 24 * hora + 1).toISOString() }, ahora).aviso, null);
-  assert.equal(textosPreparado({ ...base, fechaFin: new Date(ahora - 26 * hora).toISOString() }, ahora).aviso, "Sin entrega en SAP hace 26 h");
-  assert.equal(textosPreparado({ ...base, fechaFin: new Date(ahora - 75 * hora).toISOString() }, ahora).aviso, "Sin entrega en SAP hace 3 días");
+  assert.equal(HORAS_EN_LISTA, 24);
+  assert.equal(sigueEnLista({ ...base, fechaFin: new Date(ahora - 24 * hora + 1000).toISOString() }, ahora), true, "le falta 1 s");
+  assert.equal(sigueEnLista({ ...base, fechaFin: new Date(ahora - 24 * hora).toISOString() }, ahora), false, "cumplió 24 h");
+  assert.equal(sigueEnLista({ ...base, fechaFin: new Date(ahora - 75 * hora).toISOString() }, ahora), false);
+  assert.equal(sigueEnLista({ ...base, estado: "completo", fechaFin: new Date(ahora - 30 * hora).toISOString() }, ahora), false, "también los completos");
+  assert.equal(sigueEnLista({ ...base, fechaFin: null }, ahora), true, "sin hora de fin no vence");
   const sinDatos = textosPreparado({ ...base, fechaFin: null }, ahora);
   assert.equal(sinDatos.quien, "");
   assert.equal(sinDatos.unidades, "5 de 6 unidades · faltó 1");
-  assert.equal(sinDatos.aviso, null);
+  assert.equal("aviso" in sinDatos, false, "ya no hay aviso de entrega en la lista");
   assert.equal(textosPreparado({ ...base, unidadesPreparadas: 1, unidadesPedidas: 1, fechaFin: null }, ahora).unidades, "1 de 1 unidad");
 });
 

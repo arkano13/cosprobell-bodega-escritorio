@@ -1,7 +1,7 @@
 import { crearApi } from "./api.js";
 import { crearColaLecturas } from "./lecturas.js";
 import { icono } from "./iconos.js";
-import { textosPreparado } from "./preparados.js";
+import { HORAS_EN_LISTA, sigueEnLista, textosPreparado } from "./preparados.js";
 import { NOMBRES_DATOS, estadoDatos, estadoOperador, puedeSerUnidad, quienConfirmo, textoCambio, textoRevision, textoSinEntrega, textoUnidad } from "./supervisor.js";
 
 // ---------------------------------------------------------------------------
@@ -49,6 +49,9 @@ const cantidad = (valor) => (Number.isFinite(Number(valor)) ? Number(valor).toLo
 // Aviso (no bloqueo) cuando los datos del pedido tienen más de una hora: la regla definitiva está pendiente.
 const MINUTOS_DATOS_VIEJOS = 60;
 const datosViejos = (iso) => Date.now() - Date.parse(iso) > MINUTOS_DATOS_VIEJOS * 60000;
+// Con la lista de pedidos abierta se vuelve a pedir sola: el puente trae los cambios de SAP cada pocos minutos.
+const MINUTOS_REFRESCO = 5;
+const horaCorta = (momento) => new Date(momento).toLocaleTimeString("es-HN", { hour: "numeric", minute: "2-digit" });
 
 let audio = null;
 function sonar(tipo) {
@@ -342,7 +345,7 @@ async function cambiarOperador() {
 async function vistaPedidos() {
   mostrar(cargando("Cargando pedidos abiertos…"));
   const pedidos = [];
-  let cursor = null;
+  let cursor = null, paginas = 1, actualizadaEn = Date.now(), falloEn = null;
   try {
     const respuesta = await api.pedidos();
     pedidos.push(...respuesta.data); cursor = respuesta.siguienteCursor;
@@ -353,12 +356,13 @@ async function vistaPedidos() {
   const masBoton = boton("boton--ancho", null, "Cargar más pedidos");
   const vacio = h("p", { class: "suave vacio" });
   const contador = h("span", { class: "contador" });
-  // Los pedidos ya preparados van aparte, al final: siguen abiertos en SAP hasta que se registra la entrega.
+  const actualizado = h("p", { class: "actualizado" });
+  // Los pedidos ya preparados van aparte, al final, hasta que SAP los cierra o pasan HORAS_EN_LISTA.
   const listaPreparados = h("ul", { class: "pedidos" });
   const contadorPreparados = h("span", { class: "contador" });
   const seccionPreparados = h("section", { class: "preparados", "aria-labelledby": "titulo-preparados" },
     h("div", { class: "separador" }, h("h2", { id: "titulo-preparados" }, "Preparados"), contadorPreparados,
-      h("p", {}, "Salen de la lista cuando SAP cierra el pedido.")),
+      h("p", {}, `Salen de la lista cuando SAP cierra el pedido o ${HORAS_EN_LISTA} horas después de prepararse.`)),
     listaPreparados);
 
   const tarjetaPendiente = (p) => h("li", {},
@@ -369,7 +373,7 @@ async function vistaPedidos() {
       h("div", { class: "pedido__cuerpo" },
         h("div", { class: "pedido__cliente" }, p.cliente?.cardName ?? p.cardCode),
         h("div", { class: "pedido__meta" }, `Fecha ${fecha(p.docDate)} · Entrega ${fecha(p.docDueDate)}`),
-        h("div", { class: "pedido__meta" }, `Datos de SAP ${hace(p.sincronizadoEn)}`))));
+        h("div", { class: "pedido__meta", "data-sap": p.sincronizadoEn }, `Datos de SAP ${hace(p.sincronizadoEn)}`))));
   function tarjetaPreparado(p) {
     const textos = textosPreparado(p.preparado);
     return h("li", {},
@@ -382,13 +386,16 @@ async function vistaPedidos() {
             icono(textos.completo ? "completa" : "alerta"), textos.estado)),
           h("div", { class: "pedido__cliente" }, p.cliente?.cardName ?? p.cardCode),
           textos.quien && h("div", { class: "pedido__quien" }, textos.quien),
-          h("div", { class: "pedido__meta" }, textos.unidades),
-          textos.aviso && h("div", { class: "pedido__aviso" }, icono("alerta"), textos.aviso))));
+          h("div", { class: "pedido__meta" }, textos.unidades))));
   }
 
+  const enLista = (p) => !p.preparado || sigueEnLista(p.preparado);
+  let vencidosPintados = 0;
   function pintar() {
     const filtro = buscador.value.trim().toLowerCase();
-    const visibles = pedidos.filter((p) => !filtro || String(p.docNum).includes(filtro) || (p.cliente?.cardName ?? "").toLowerCase().includes(filtro));
+    const vigentes = pedidos.filter(enLista);
+    vencidosPintados = pedidos.length - vigentes.length;
+    const visibles = vigentes.filter((p) => !filtro || String(p.docNum).includes(filtro) || (p.cliente?.cardName ?? "").toLowerCase().includes(filtro));
     const pendientes = visibles.filter((p) => !p.preparado);
     const preparados = visibles.filter((p) => p.preparado);
     lista.replaceChildren(...pendientes.map(tarjetaPendiente));
@@ -397,33 +404,84 @@ async function vistaPedidos() {
     seccionPreparados.hidden = preparados.length === 0;
     contadorPreparados.textContent = String(preparados.length);
     contadorPreparados.setAttribute("aria-label", `${preparados.length} pedidos preparados`);
-    contador.textContent = `${pedidos.length}${cursor === null ? "" : "+"}`;
+    contador.textContent = `${vigentes.length}${cursor === null ? "" : "+"}`;
     contador.setAttribute("aria-label", `${contador.textContent} pedidos cargados`);
-    vacio.textContent = !pedidos.length ? "No hay pedidos abiertos."
+    vacio.textContent = !vigentes.length ? "No hay pedidos abiertos."
       : !visibles.length ? "Ningún pedido coincide con la búsqueda."
         : !pendientes.length && !filtro ? "Todos los pedidos abiertos ya están preparados." : "";
     vacio.hidden = !vacio.textContent;
     masBoton.hidden = cursor === null;
+    pintarActualizado();
   }
+
+  // Cuándo se pidió la lista y cuándo llegaron los últimos datos de SAP (el puente actualiza sincronizadoEn de
+  // cada pedido abierto en cada recorrido, aunque no haya cambiado).
+  function pintarActualizado() {
+    const sap = pedidos.reduce((ultimo, p) => Math.max(ultimo, Date.parse(p.sincronizadoEn) || 0), 0);
+    const sapViejo = sap > 0 && datosViejos(new Date(sap).toISOString());
+    actualizado.replaceChildren(
+      falloEn === null
+        ? h("span", {}, icono("actualizar"), `Actualizada a las ${horaCorta(actualizadaEn)} · se actualiza sola cada ${MINUTOS_REFRESCO} min`)
+        : h("span", { class: "actualizado__alerta" }, icono("alerta"),
+          `No se pudo actualizar a las ${horaCorta(falloEn)}: se muestra la lista de las ${horaCorta(actualizadaEn)}`),
+      sap > 0 && h("span", sapViejo ? { class: "actualizado__alerta" } : {}, sapViejo && icono("alerta"),
+        `Datos de SAP ${hace(new Date(sap).toISOString())}`));
+  }
+
+  // Una sola carga a la vez: la actualización automática y "Cargar más" no se pisan.
+  let ocupado = false, vigente = true;
+  async function recargar() {
+    if (ocupado) return;
+    ocupado = true;
+    try {
+      const nuevos = [];
+      let siguiente = null;
+      for (let pagina = 0; pagina < paginas; pagina++) {
+        const respuesta = await api.pedidos(siguiente);
+        nuevos.push(...respuesta.data); siguiente = respuesta.siguienteCursor;
+        if (siguiente === null) break;
+      }
+      if (!vigente) return;
+      pedidos.splice(0, pedidos.length, ...nuevos); cursor = siguiente;
+      actualizadaEn = Date.now(); falloEn = null;
+      pintar();
+    } catch (error) {
+      if (!vigente) return;
+      if (error.status === 401) return mostrarError(error);
+      falloEn = Date.now(); pintarActualizado();
+    } finally { ocupado = false; }
+  }
+
   buscador.addEventListener("input", pintar);
   masBoton.addEventListener("click", async () => {
-    masBoton.disabled = true;
+    if (ocupado) return;
+    ocupado = true; masBoton.disabled = true;
     try {
       const respuesta = await api.pedidos(cursor);
-      pedidos.push(...respuesta.data); cursor = respuesta.siguienteCursor;
+      pedidos.push(...respuesta.data); cursor = respuesta.siguienteCursor; paginas++;
       pintar();
     } catch (error) { if (error.status === 401) return mostrarError(error); }
-    masBoton.disabled = false;
+    finally { ocupado = false; masBoton.disabled = false; }
   });
 
   const abierta = estado.sesion && aviso("alerta", `Tenés una preparación abierta: pedido ${estado.sesion.docNum ?? estado.sesion.docEntry}.`, {},
     boton("boton--principal", "escaner", "Continuar", { onclick: () => vistaEscaneo() }));
 
   mostrarAmplio(
-    h("div", { class: "encabezado" }, h("div", { class: "encabezado__titulo" }, h("h1", {}, "Pedidos abiertos"), contador),
+    h("div", { class: "encabezado" },
+      h("div", {}, h("div", { class: "encabezado__titulo" }, h("h1", {}, "Pedidos abiertos"), contador), actualizado),
       boton("", "actualizar", "Actualizar", { onclick: () => vistaPedidos() })),
     abierta, h("label", { class: "buscador" }, icono("buscar"), buscador), vacio, lista, seccionPreparados, masBoton);
   pintar();
+  // Cada minuto: un preparado que cumplió las horas sale (solo se repinta la lista si cambió algo) y se
+  // actualiza el "hace N min". Cada MINUTOS_REFRESCO se vuelve a pedir la lista al servidor.
+  const reloj = setInterval(() => {
+    if (pedidos.length - pedidos.filter(enLista).length !== vencidosPintados) return pintar();
+    pintarActualizado();
+    for (const meta of lista.querySelectorAll("[data-sap]")) meta.textContent = `Datos de SAP ${hace(meta.dataset.sap)}`;
+  }, 60_000);
+  const refresco = setInterval(recargar, MINUTOS_REFRESCO * 60_000);
+  limpiezas.push(() => { vigente = false; clearInterval(reloj); clearInterval(refresco); });
 }
 
 // Un pedido ya preparado abre su resumen; no se puede empezar otra preparación hasta que SAP lo cierre.
