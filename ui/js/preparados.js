@@ -1,7 +1,6 @@
-// Textos de un pedido ya preparado en la lista. El pedido sigue abierto hasta que SAP registra la entrega y lo
-// cierra; entonces sale solo de la lista. No se quita por tiempo: pasadas HORAS_SIN_ENTREGA se avisa para revisar
-// la entrega en SAP.
-export const HORAS_SIN_ENTREGA = 24;
+// Textos de un pedido ya preparado en la lista. Sale de la lista cuando SAP registra la entrega y cierra el pedido,
+// o HORAS_EN_LISTA después de prepararse; a partir de ahí lo sigue viendo el supervisor en su panel (Revisiones).
+export const HORAS_EN_LISTA = 24;
 const HORA = 3_600_000;
 const numero = (valor) => Number(valor).toLocaleString("es-HN");
 
@@ -24,15 +23,17 @@ export function textosPreparado(preparado, ahora = Date.now()) {
   const fin = Date.parse(preparado.fechaFin);
   const conFecha = Number.isFinite(fin);
   const faltan = Math.max(0, preparado.unidadesPedidas - preparado.unidadesPreparadas);
-  const horas = conFecha ? Math.floor((ahora - fin) / HORA) : null;
   return {
     completo,
     estado: completo ? "Preparado" : "Preparado con diferencias",
     quien: [preparado.operador && `Preparado por ${preparado.operador}`, conFecha && cuando(fin, ahora)].filter(Boolean).join(" · "),
     unidades: `${numero(preparado.unidadesPreparadas)} de ${numero(preparado.unidadesPedidas)} ${preparado.unidadesPedidas === 1 ? "unidad" : "unidades"}`
       + (faltan === 0 ? "" : faltan === 1 ? " · faltó 1" : ` · faltaron ${numero(faltan)}`),
-    aviso: horas !== null && horas >= HORAS_SIN_ENTREGA
-      ? `Sin entrega en SAP hace ${horas < 48 ? `${horas} h` : `${Math.floor(horas / 24)} días`}`
-      : null,
   };
+}
+
+// Sin hora de fin no se puede saber cuándo vence: se deja en la lista.
+export function sigueEnLista(preparado, ahora = Date.now()) {
+  const fin = Date.parse(preparado.fechaFin);
+  return !Number.isFinite(fin) || ahora - fin < HORAS_EN_LISTA * HORA;
 }

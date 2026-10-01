@@ -150,6 +150,10 @@ h2 {
 .encabezado { display: flex; flex-wrap: wrap; align-items: flex-end; justify-content: space-between; gap: 12px 16px; margin: 0 0 20px; }
 .encabezado__titulo { display: flex; align-items: center; gap: 12px; }
 .encabezado__sub { margin-top: 6px; font-size: 18px; font-weight: 600; overflow-wrap: anywhere; }
+.actualizado { display: flex; flex-wrap: wrap; gap: 4px 18px; margin: 8px 0 0; color: var(--tinta-suave); font-size: 15px; font-weight: 600; }
+.actualizado span { display: inline-flex; align-items: center; gap: 6px; }
+.actualizado .icono { width: 18px; height: 18px; }
+.actualizado__alerta { color: var(--alerta-texto); }
 .contador {
   display: inline-grid; place-items: center; min-width: 36px; height: 32px; padding: 0 10px;
   border-radius: 999px; background: var(--lila); color: var(--tinta);
@@ -325,12 +329,6 @@ h2 {
 .pedido__quien { margin-top: 8px; font-size: 15px; font-weight: 600; }
 .pedido--preparado .pedido__quien { color: var(--ok-texto); }
 .pedido--diferencias .pedido__quien { color: var(--alerta-texto); }
-.pedido__aviso {
-  display: flex; align-items: center; gap: 8px; margin-top: 12px; padding: 8px 10px;
-  border: 1px solid var(--alerta-borde); border-radius: 6px; background: var(--alerta-fondo);
-  color: var(--alerta-texto); font-size: 14px; font-weight: 700;
-}
-.pedido__aviso .icono { width: 18px; height: 18px; color: var(--alerta-texto); }
 
 /* ---------- Líneas del pedido ---------- */
 .lineas { list-style: none; margin: 0; padding: 0; }
