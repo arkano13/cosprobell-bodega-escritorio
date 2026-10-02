@@ -79,7 +79,35 @@ export const NOMBRES_DOCUMENTO = {
 export const textoDocumento = (d) => `${NOMBRES_DOCUMENTO[d.tipo] ?? d.tipo} ${d.docNum}`;
 
 // Lo que entra en una recepción: total de unidades y frase para confirmar.
-export function resumenRecepcion({ modo, cajas, unidadesPorCaja, unidades: sueltas, destino, lote }) {
+// Cajas por grupos (cada grupo con su lote) y lo que sobra como un bulto en la grande. filas: [{ cajas,
+// unidadesPorCaja, lote, vencimiento }], bulto: { unidades, lote, vencimiento } o null. Devuelve el cuerpo con sus
+// totales ({ grupos, bulto, cajas, total, etiquetas }) o { problema }.
+export function armarGrupos(filas, bulto = null) {
+  const grupos = [];
+  for (const [i, f] of filas.entries()) {
+    const cual = filas.length > 1 ? ` (fila ${i + 1})` : "";
+    if (!Number.isInteger(f.cajas) || f.cajas < 1 || f.cajas > 200) return { problema: `Escribí la cantidad de cajas, de 1 a 200${cual}.` };
+    if (!Number.isInteger(f.unidadesPorCaja) || f.unidadesPorCaja < 1) return { problema: `Escribí cuántas unidades trae cada caja${cual}.` };
+    grupos.push({ cajas: f.cajas, unidadesPorCaja: f.unidadesPorCaja, lote: f.lote || null, vencimiento: f.vencimiento ?? null });
+  }
+  if (!grupos.length) return { problema: "Agregá al menos una fila de cajas." };
+  const cajas = grupos.reduce((t, g) => t + g.cajas, 0);
+  if (cajas > 500) return { problema: "Hasta 500 cajas por vez." };
+  if (bulto && (!Number.isInteger(bulto.unidades) || bulto.unidades < 1)) return { problema: "Escribí cuántas unidades sueltas sobraron, o dejalo vacío." };
+  const enCajas = grupos.reduce((t, g) => t + g.cajas * g.unidadesPorCaja, 0);
+  return { grupos, bulto: bulto ? { unidades: bulto.unidades, lote: bulto.lote || null, vencimiento: bulto.vencimiento ?? null } : null,
+    cajas, enCajas, total: enCajas + (bulto?.unidades ?? 0), etiquetas: cajas + (bulto ? 1 : 0) };
+}
+
+export function resumenRecepcion({ modo, cajas, unidadesPorCaja, unidades: sueltas, destino, lote, grupos, bulto }) {
+  if (modo === "grupos") {
+    const r = armarGrupos(grupos ?? [], bulto ?? null);
+    if (r.problema) return { total: 0, texto: "" };
+    const lotes = new Set(r.grupos.map((g) => g.lote ?? ""));
+    const deLotes = lotes.size > 1 ? ` de ${numero(lotes.size)} lotes` : r.grupos[0].lote ? ` del lote ${r.grupos[0].lote}` : "";
+    const extra = r.bulto ? ` Más un bulto suelto de ${unidades(r.bulto.unidades)}.` : "";
+    return { total: r.total, texto: `Entran ${numero(r.cajas)} ${r.cajas === 1 ? "caja" : "cajas"} · ${unidades(r.enCajas)}${deLotes} a la bodega grande.${extra}` };
+  }
   const total = modo === "cajas" ? cajas * unidadesPorCaja : sueltas;
   if (!Number.isInteger(total) || total <= 0) return { total: 0, texto: "" };
   const deLote = lote ? ` del lote ${lote}` : "";
@@ -229,9 +257,20 @@ export function armarLotesDespacho(elegir, asignado) {
 
 // Lista de productos: los filtros que tienen sentido según haya almacenes de SAP marcados y comparación disponible.
 export function filtrosExistencias({ conteos = {}, almacenes = [], comparacionDisponible = false }) {
-  return [["todos", "Todos"], ["grande", "Bodega grande"], ["pequena", "Bodega pequeña"],
-    almacenes.length > 0 && ["solo_sap", "Solo en SAP"], comparacionDisponible && ["diferencia", "Con diferencia"]]
+  return [["todos", "Todos"], almacenes.length > 0 && ["solo_sap", "Solo en SAP"], comparacionDisponible && ["diferencia", "Con diferencia"]]
     .filter(Boolean).map(([id, texto]) => ({ id, texto, n: conteos[id] ?? 0 }));
+}
+
+// Vista de una bodega: "Sin registrar" solo si la bodega tiene su almacén de SAP asignado.
+export function filtrosBodega({ conteos = {}, almacen = null }) {
+  return [["todos", "Todos"], ["registrados", "Registrados"], almacen && ["sin_registrar", "Sin registrar"]]
+    .filter(Boolean).map(([id, texto]) => ({ id, texto, n: conteos[id] ?? 0 }));
+}
+
+// Un lote dentro de una bodega: "L2408-090 · vence 09/2026 · 3 cajas · 60 unidades".
+export function textoLoteBodega(l, { conCajas = false } = {}) {
+  return [l.lote ?? "Sin lote", l.vencimiento && `vence ${textoVencimiento(l.vencimiento)}`,
+    conCajas && `${numero(l.cajas)} ${l.cajas === 1 ? "caja" : "cajas"}`, unidades(l.unidades)].filter(Boolean).join(" · ");
 }
 
 // Estado de una fila frente a SAP para su insignia ({ tipo, texto }), o null sin comparación.

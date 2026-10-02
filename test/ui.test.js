@@ -185,8 +185,8 @@ test("supervisor: textos de revisiones", () => {
 });
 
 import { PATRONES, simbolos, anchos, barras, MARGEN } from "../ui/js/code128.js";
-import { ESTADOS, armarAsignaciones, armarConteo, armarLotesDespacho, cantidadMovimiento, diasParaVencer, esCodigoCaja, estadoFila,
-  filtrosExistencias, finDeMes, nombreOpcion,
+import { ESTADOS, armarAsignaciones, armarConteo, armarGrupos, armarLotesDespacho, cantidadMovimiento, diasParaVencer, esCodigoCaja, estadoFila,
+  filtrosBodega, filtrosExistencias, finDeMes, nombreOpcion, textoLoteBodega,
   opcionesDescuento, quien, resumenRecepcion, revisarDespacho, sugerirAsignacion, textoAsignacion, textoDocumento, textoEstado, textoMovimiento,
   textoPorVencer, textoVencimiento, unidadesPorProducto } from "../ui/js/inventario.js";
 import { crearOperacion } from "../ui/js/operaciones.js";
@@ -353,9 +353,9 @@ test("api: cuerpos de finalizar, confirmación masiva y operaciones del inventar
 
 test("inventario: lista de productos, filtros según SAP y estado de cada fila", async () => {
   const conteos = { todos: 4, grande: 2, pequena: 3, solo_sap: 1, diferencia: 2 };
-  assert.deepEqual(filtrosExistencias({ conteos, almacenes: [], comparacionDisponible: false }).map((f) => f.id), ["todos", "grande", "pequena"]);
+  assert.deepEqual(filtrosExistencias({ conteos, almacenes: [], comparacionDisponible: false }).map((f) => f.id), ["todos"]);
   assert.deepEqual(filtrosExistencias({ conteos, almacenes: ["01", "02"], comparacionDisponible: false }).map((f) => [f.id, f.n]),
-    [["todos", 4], ["grande", 2], ["pequena", 3], ["solo_sap", 1]]);
+    [["todos", 4], ["solo_sap", 1]]);
   assert.deepEqual(filtrosExistencias({ conteos, almacenes: ["01"], comparacionDisponible: true }).at(-1), { id: "diferencia", texto: "Con diferencia", n: 2 });
   assert.deepEqual(estadoFila({ estado: "por_ubicar", diferencia: 1200 }), { tipo: "alerta", texto: "Por ubicar: 1,200" });
   assert.deepEqual(estadoFila({ estado: "por_descontar", diferencia: -3 }), { tipo: "alerta", texto: "Por descontar: 3" });
@@ -368,4 +368,42 @@ test("inventario: lista de productos, filtros según SAP y estado de cada fila",
   await api.existencias({ buscar: "crema 2", filtro: "solo_sap", pagina: 3 });
   assert.deepEqual(pedidos, ["/inventario/existencias?filtro=todos&pagina=0&limit=50",
     "/inventario/existencias?filtro=solo_sap&pagina=3&limit=50&buscar=crema+2"]);
+});
+
+test("inventario: recibir o contar cajas por lote, con el bulto de lo que sobra", () => {
+  const filas = [{ cajas: 3, unidadesPorCaja: 20, lote: "L1", vencimiento: "2027-01-31" }, { cajas: 2, unidadesPorCaja: 24, lote: null, vencimiento: null }];
+  const r = armarGrupos(filas, { unidades: 7, lote: "", vencimiento: null });
+  assert.deepEqual(r, { grupos: [{ cajas: 3, unidadesPorCaja: 20, lote: "L1", vencimiento: "2027-01-31" }, { cajas: 2, unidadesPorCaja: 24, lote: null, vencimiento: null }],
+    bulto: { unidades: 7, lote: null, vencimiento: null }, cajas: 5, enCajas: 108, total: 115, etiquetas: 6 });
+  assert.equal(armarGrupos(filas).etiquetas, 5);
+  assert.match(armarGrupos([...filas, { cajas: 0, unidadesPorCaja: 10 }]).problema, /cantidad de cajas, de 1 a 200 \(fila 3\)/);
+  assert.match(armarGrupos([{ cajas: 2, unidadesPorCaja: NaN }]).problema, /cuántas unidades trae cada caja\.$/);
+  assert.match(armarGrupos(filas, { unidades: 0 }).problema, /sueltas sobraron/);
+  assert.match(armarGrupos([]).problema, /al menos una fila/);
+  assert.match(armarGrupos([{ cajas: 200, unidadesPorCaja: 1 }, { cajas: 200, unidadesPorCaja: 1 }, { cajas: 101, unidadesPorCaja: 1 }]).problema, /500 cajas/);
+  // El resumen de una sola fila sin bulto queda como antes; con varios lotes, los cuenta.
+  assert.deepEqual(resumenRecepcion({ modo: "grupos", grupos: [{ cajas: 4, unidadesPorCaja: 20, lote: "L2408-090" }] }),
+    { total: 80, texto: "Entran 4 cajas · 80 unidades del lote L2408-090 a la bodega grande." });
+  assert.deepEqual(resumenRecepcion({ modo: "grupos", grupos: filas, bulto: { unidades: 7 } }),
+    { total: 115, texto: "Entran 5 cajas · 108 unidades de 2 lotes a la bodega grande. Más un bulto suelto de 7 unidades." });
+  assert.equal(resumenRecepcion({ modo: "grupos", grupos: [{ cajas: 0, unidadesPorCaja: 5 }] }).total, 0);
+});
+
+test("inventario: vista de cada bodega, filtros y texto de cada lote", async () => {
+  assert.deepEqual(filtrosBodega({ conteos: { todos: 5, registrados: 1, sin_registrar: 4 }, almacen: null }).map((f) => f.id), ["todos", "registrados"]);
+  assert.deepEqual(filtrosBodega({ conteos: { todos: 5, registrados: 1, sin_registrar: 4 }, almacen: "01" }).at(-1), { id: "sin_registrar", texto: "Sin registrar", n: 4 });
+  assert.equal(textoLoteBodega({ lote: "L2408-090", vencimiento: "2026-09-30", unidades: 60, cajas: 3 }, { conCajas: true }), "L2408-090 · vence 09/2026 · 3 cajas · 60 unidades");
+  assert.equal(textoLoteBodega({ lote: null, vencimiento: null, unidades: 1, cajas: 0 }), "Sin lote · 1 unidad");
+  const pedidos = [];
+  const api = crearApi({ token: "t", fetchImpl: async (url, opciones) => { pedidos.push([url, opciones.body && JSON.parse(opciones.body)]); return Response.json({ data: {} }); } });
+  await api.bodega("grande");
+  await api.bodega("pequena", { buscar: "sh", filtro: "sin_registrar", pagina: 1 });
+  await api.elegirAlmacenes(["01", "02"], true, { almacenGrande: "01", almacenPequena: null });
+  await api.elegirAlmacenes(["01"], false);
+  assert.deepEqual(pedidos, [
+    ["/inventario/bodegas/grande?filtro=todos&pagina=0&limit=50", undefined],
+    ["/inventario/bodegas/pequena?filtro=sin_registrar&pagina=1&limit=50&buscar=sh", undefined],
+    ["/supervisor/almacenes", { almacenes: ["01", "02"], pedidosSoloDeEstaBodega: true, almacenGrande: "01", almacenPequena: null }],
+    ["/supervisor/almacenes", { almacenes: ["01"], pedidosSoloDeEstaBodega: false }],
+  ]);
 });

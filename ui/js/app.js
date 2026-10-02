@@ -3,9 +3,9 @@ import { crearColaLecturas } from "./lecturas.js";
 import { icono } from "./iconos.js";
 import { HORAS_EN_LISTA, sigueEnLista, textosPreparado } from "./preparados.js";
 import { NOMBRES_DATOS, estadoDatos, estadoOperador, puedeSerUnidad, quienConfirmo, textoCambio, textoRevision, textoSinEntrega, textoUnidad } from "./supervisor.js";
-import { ESTADOS, TEXTO_SIN_COMPARACION, armarAsignaciones, armarConteo, armarLotesDespacho, cantidadMovimiento, diasParaVencer, esCodigoCaja,
-  estadoFila, filtrosExistencias, finDeMes, nombreOpcion, opcionesDescuento, quien, resumenRecepcion, revisarDespacho, sugerirAsignacion, textoAsignacion, textoDocumento,
-  textoEstado, textoMovimiento, textoPorVencer, textoVencimiento, unidadesPorProducto } from "./inventario.js";
+import { ESTADOS, TEXTO_SIN_COMPARACION, armarAsignaciones, armarConteo, armarGrupos, armarLotesDespacho, cantidadMovimiento, diasParaVencer, esCodigoCaja,
+  estadoFila, filtrosBodega, filtrosExistencias, finDeMes, nombreOpcion, opcionesDescuento, quien, resumenRecepcion, revisarDespacho, sugerirAsignacion, textoAsignacion, textoDocumento,
+  textoEstado, textoLoteBodega, textoMovimiento, textoPorVencer, textoVencimiento, unidadesPorProducto } from "./inventario.js";
 import { crearOperacion } from "./operaciones.js";
 import { barras } from "./code128.js";
 
@@ -35,6 +35,11 @@ function h(etiqueta, atributos = {}, ...hijos) {
     if (hijo !== null && hijo !== undefined && hijo !== false) elemento.append(hijo instanceof Node ? hijo : String(hijo));
   }
   return elemento;
+}
+
+// Como replaceChildren, pero sin mostrar las partes condicionales (a && h(...)) que vienen como false, null o undefined.
+function poner(elemento, ...hijos) {
+  elemento.replaceChildren(...hijos.flat().filter((hijo) => hijo !== false && hijo !== null && hijo !== undefined));
 }
 
 function hace(fechaIso) {
@@ -452,7 +457,7 @@ async function vistaPedidos() {
   function pintarActualizado() {
     const sap = pedidos.reduce((ultimo, p) => Math.max(ultimo, Date.parse(p.sincronizadoEn) || 0), 0);
     const sapViejo = sap > 0 && datosViejos(new Date(sap).toISOString());
-    actualizado.replaceChildren(
+    poner(actualizado,
       falloEn === null
         ? h("span", {}, icono("actualizar"), `Actualizada a las ${horaCorta(actualizadaEn)} · se actualiza sola cada ${MINUTOS_REFRESCO} min`)
         : h("span", { class: "actualizado__alerta" }, icono("alerta"),
@@ -1367,10 +1372,12 @@ async function vistaInventario() {
     comparar && p.actualizando > 0 && h("p", { class: "suave nota" }, icono("info"),
       `${numero(p.actualizando)} ${p.actualizando === 1 ? "producto tuvo" : "productos tuvieron"} cambios recientes en SAP: se revisan cuando termine de llegar todo (unos 15 minutos).`),
     h("div", { class: "bodegas" },
-      h("section", { class: "tarjeta bodega" }, h("h2", {}, icono("caja"), "Bodega grande"),
+      h("section", { class: "tarjeta bodega" }, h("div", { class: "fila fila--entre" }, h("h2", {}, icono("caja"), "Bodega grande"),
+        boton("", "siguiente", "Ver lo que hay", { onclick: () => vistaProductos({ vista: "grande" }) })),
         h("div", { class: "cifras" }, cifra(r.grande.cajas, "cajas"), cifra(r.grande.abiertas, "abiertas"), cifra(r.grande.productos, "productos"),
           cifra(r.grande.lotes, "lotes"), cifra(r.grande.unidades, "unidades"))),
-      h("section", { class: "tarjeta bodega" }, h("h2", {}, icono("capas"), "Bodega pequeña"),
+      h("section", { class: "tarjeta bodega" }, h("div", { class: "fila fila--entre" }, h("h2", {}, icono("capas"), "Bodega pequeña"),
+        boton("", "siguiente", "Ver lo que hay", { onclick: () => vistaProductos({ vista: "pequena" }) })),
         h("div", { class: "cifras" }, cifra(r.pequena.unidades, "unidades"), cifra(r.pequena.productos, "productos"),
           r.pequena.negativos > 0 && cifra(r.pequena.negativos, "con faltante")))),
     h("div", { class: "fila fila--entre titulo-seccion" }, h("h2", {}, "Últimos movimientos"),
@@ -1566,56 +1573,87 @@ function contarPequena(p) {
   filas[0]?.unidades.focus();
 }
 
-// Todos los productos de las bodegas, sin tener que buscarlos: lo registrado en la grande y la pequeña y lo que
-// SAP tiene en los almacenes marcados. Escribir filtra la lista; un código leído con Enter abre el producto.
-function vistaProductos({ buscar = "", filtro = "todos", pagina = 0 } = {}) {
+// Productos de las bodegas sin tener que buscarlos, en tres pestañas: todos (grande, pequeña y SAP de los almacenes
+// marcados), la bodega grande y la bodega pequeña (por lote, con lo que SAP tiene en el almacén de cada una).
+// Escribir filtra la lista; un código leído con Enter abre el producto.
+const VISTAS_PRODUCTOS = [["todos", "Todos los productos"], ["grande", "Bodega grande"], ["pequena", "Bodega pequeña"]];
+function vistaProductos({ vista = "todos", buscar = "", filtro = "todos", pagina = 0 } = {}) {
   estado.desdeLista = null;
-  const abrir = (itemCode) => { estado.desdeLista = { buscar, filtro, pagina }; vistaProducto(itemCode); };
+  const abrir = (itemCode) => { estado.desdeLista = { vista, buscar, filtro, pagina }; vistaProducto(itemCode); };
   const buscador = h("input", { class: "buscador__campo", type: "search", value: buscar, autocomplete: "off", spellcheck: "false",
     placeholder: "Buscar por nombre o código, o escaneá el producto", "aria-label": "Buscar producto" });
+  const pestanas = h("nav", { class: "pestanas", "aria-label": "Qué mostrar" }, VISTAS_PRODUCTOS.map(([id, texto]) =>
+    h("button", { class: "pestana", type: "button", "aria-current": id === vista ? "page" : null,
+      onclick: () => vistaProductos({ vista: id, buscar: buscador.value.trim() }) }, texto)));
   const filtros = h("div", { class: "filtros", role: "group", "aria-label": "Mostrar" });
   const nota = h("div", {});
   const contenido = h("div", { "aria-live": "polite" });
   const pie = h("div", { class: "fila fila--entre" });
   let vez = 0, espera = null;
+  const pintarFiltros = (lista) => filtros.replaceChildren(...lista.map((f) => h("button", { class: "filtro", type: "button",
+    "aria-pressed": String(f.id === filtro), onclick: () => { filtro = f.id; pagina = 0; cargar(); } }, f.texto, h("span", { class: "n" }, numero(f.n)))));
+  const llegada = (r) => (r.existenciasSapAl ? `existencias recibidas ${hace(r.existenciasSapAl)}` : "sin fecha de llegada");
+  const vacio = (r) => aviso("info", buscar ? `Ningún producto coincide con "${buscar}".`
+    : filtro !== "todos" ? "No hay productos en este filtro." : vista === "todos" ? "Todavía no hay productos en las bodegas." : "Todavía no hay nada registrado en esta bodega.");
+  const nombreProducto = (v) => h("th", { scope: "row" }, h("button", { class: "enlace", type: "button", onclick: () => abrir(v.itemCode) }, v.itemName),
+    h("div", { class: "codigo suave" }, v.itemCode));
+  const tabla = (columnas, filas) => h("div", { class: "tabla-envoltura" }, h("table", { class: "tabla tabla--productos" },
+    h("thead", {}, h("tr", {}, columnas.map(([t, numerica]) => h("th", { scope: "col", class: numerica ? "tabla__numero" : null }, t)))),
+    h("tbody", {}, filas)));
+
+  function pintarTodos(r) {
+    const conSap = r.almacenes.length > 0, comparar = r.comparacionDisponible === true;
+    pintarFiltros(filtrosExistencias(r));
+    const en = r.almacenes.length === 1 ? `el almacén ${r.almacenes[0]}` : `los almacenes ${r.almacenes.slice(0, -1).join(", ")} y ${r.almacenes.at(-1)}`;
+    poner(nota, !conSap
+      ? aviso("info", "Se muestra lo registrado en la bodega grande y la pequeña. Para ver también lo que tiene SAP, el supervisor marca los almacenes de esta bodega.", {},
+        esSupervisor() && boton("", "bodega", "Elegir almacenes", { onclick: () => vistaSupervisor("almacenes") }))
+      : !comparar ? aviso("info", `"En SAP" es lo último que llegó de SAP para ${en} (${llegada(r)}). La comparación con SAP no está disponible.`)
+        : h("p", { class: "suave nota" }, icono("info"), `"En SAP" es lo que SAP tiene en ${en} (${llegada(r)}).`));
+    if (!r.data.length) return contenido.replaceChildren(vacio(r));
+    contenido.replaceChildren(tabla([["Producto"], ["Bodega grande", true], ["Bodega pequeña", true], conSap && ["En SAP", true], comparar && ["Frente a SAP"]].filter(Boolean),
+      r.data.map((v) => {
+        const e = estadoFila(v);
+        return h("tr", {}, nombreProducto(v),
+          h("td", { class: "tabla__numero" }, h("strong", {}, numero(v.grande)),
+            v.cajas > 0 && h("div", { class: "suave" }, `${numero(v.cajas)} ${v.cajas === 1 ? "caja" : "cajas"}`)),
+          h("td", { class: "tabla__numero" }, h("strong", {}, numero(v.pequena))),
+          conSap && h("td", { class: "tabla__numero" }, numero(v.sap)),
+          comparar && h("td", {}, e ? insignia(e.tipo, e.tipo === "ok" ? "completa" : e.tipo === "gris" ? null : "alerta", e.texto) : "—"));
+      })));
+  }
+
+  function pintarBodega(r) {
+    const grande = vista === "grande";
+    pintarFiltros(filtrosBodega(r));
+    const cifras = `${numero(r.resumen.productos)} ${r.resumen.productos === 1 ? "producto" : "productos"} · ${unidadesTexto(r.resumen.unidades)}`
+      + (grande ? ` en ${numero(r.resumen.cajas)} ${r.resumen.cajas === 1 ? "caja" : "cajas"}` : "");
+    poner(nota, h("p", { class: "cifras-bodega" }, h("strong", {}, cifras)),
+      r.almacen ? h("p", { class: "suave nota" }, icono("info"), `"En SAP" es lo que SAP tiene en el almacén ${r.almacen} (${llegada(r)}). "Sin registrar": SAP lo tiene ahí y en la bodega todavía no se contó.`)
+        : aviso("info", `Para ver lo que SAP tiene en la bodega ${grande ? "grande" : "pequeña"}, el supervisor elige su almacén en Panel del supervisor → Almacenes.`, {},
+          esSupervisor() && boton("", "bodega", "Elegir almacenes", { onclick: () => vistaSupervisor("almacenes") })));
+    if (!r.data.length) return contenido.replaceChildren(vacio(r));
+    contenido.replaceChildren(tabla([["Producto"], ["Lotes"], grande && ["Cajas", true], ["Unidades", true], r.almacen && [`En SAP · ${r.almacen}`, true]].filter(Boolean),
+      r.data.map((v) => h("tr", { class: v.unidades === 0 ? "fila--sin-registrar" : null }, nombreProducto(v),
+        h("td", {}, v.lotes.length ? h("ul", { class: "lotes-celda" }, v.lotes.map((l) => {
+          const dias = diasParaVencer(l.vencimiento);
+          return h("li", {}, textoLoteBodega(l, { conCajas: grande }), dias !== null && dias < 0 && h("span", {}, " ", insignia("error", "alerta", "Vencido")));
+        })) : v.unidades === 0 ? insignia("gris", null, "Sin registrar") : h("span", { class: "suave" }, "—")),
+        grande && h("td", { class: "tabla__numero" }, numero(v.cajas)),
+        h("td", { class: "tabla__numero" }, h("strong", {}, numero(v.unidades))),
+        r.almacen && h("td", { class: "tabla__numero" }, numero(v.sap))))));
+  }
+
   async function cargar() {
     const esta = ++vez;
     contenido.replaceChildren(cargando("Cargando productos…"));
     let r;
-    try { r = await api.existencias({ buscar, filtro, pagina }); } catch (error) {
+    try { r = vista === "todos" ? await api.existencias({ buscar, filtro, pagina }) : await api.bodega(vista, { buscar, filtro, pagina }); } catch (error) {
       if (error.status === 401) return mostrarError(error);
       return contenido.replaceChildren(aviso("error", error.mensaje, { role: "alert" }));
     }
     if (esta !== vez) return; // ya se pidió otra búsqueda
-    const conSap = r.almacenes.length > 0, comparar = r.comparacionDisponible === true;
-    filtros.replaceChildren(...filtrosExistencias(r).map((f) => h("button", { class: "filtro", type: "button", "aria-pressed": String(f.id === filtro),
-      onclick: () => { filtro = f.id; pagina = 0; cargar(); } }, f.texto, h("span", { class: "n" }, numero(f.n)))));
-    const llegada = r.existenciasSapAl ? `recibidas ${hace(r.existenciasSapAl)}` : "sin fecha de llegada";
-    const en = r.almacenes.length === 1 ? `el almacén ${r.almacenes[0]}` : `los almacenes ${r.almacenes.slice(0, -1).join(", ")} y ${r.almacenes.at(-1)}`;
-    nota.replaceChildren(!conSap
-      ? aviso("info", "Se muestra lo registrado en la bodega grande y la pequeña. Para ver también lo que tiene SAP, el supervisor marca los almacenes de esta bodega.", {},
-        esSupervisor() && boton("", "bodega", "Elegir almacenes", { onclick: () => vistaSupervisor("almacenes") }))
-      : !comparar ? aviso("info", `"En SAP" es lo último que llegó de SAP para ${en} (existencias ${llegada}). La comparación con SAP no está disponible.`)
-        : h("p", { class: "suave nota" }, icono("info"), `"En SAP" es lo que SAP tiene en ${en} (existencias ${llegada}).`));
-    if (!r.data.length) {
-      contenido.replaceChildren(aviso("info", buscar ? `Ningún producto coincide con "${buscar}".`
-        : filtro === "todos" ? "Todavía no hay productos en las bodegas." : "No hay productos en este filtro."));
-    } else {
-      const columnas = ["Producto", "Bodega grande", "Bodega pequeña", conSap && "En SAP", comparar && "Frente a SAP"].filter(Boolean);
-      contenido.replaceChildren(h("div", { class: "tabla-envoltura" }, h("table", { class: "tabla tabla--productos" },
-        h("thead", {}, h("tr", {}, columnas.map((t) => h("th", { scope: "col", class: ["Bodega grande", "Bodega pequeña", "En SAP"].includes(t) ? "tabla__numero" : null }, t)))),
-        h("tbody", {}, r.data.map((v) => {
-          const e = estadoFila(v);
-          return h("tr", {},
-            h("th", { scope: "row" }, h("button", { class: "enlace", type: "button", onclick: () => abrir(v.itemCode) }, v.itemName),
-              h("div", { class: "codigo suave" }, v.itemCode)),
-            h("td", { class: "tabla__numero" }, h("strong", {}, numero(v.grande)),
-              v.cajas > 0 && h("div", { class: "suave" }, `${numero(v.cajas)} ${v.cajas === 1 ? "caja" : "cajas"}`)),
-            h("td", { class: "tabla__numero" }, h("strong", {}, numero(v.pequena))),
-            conSap && h("td", { class: "tabla__numero" }, numero(v.sap)),
-            comparar && h("td", {}, e ? insignia(e.tipo, e.tipo === "ok" ? "completa" : e.tipo === "gris" ? null : "alerta", e.texto) : "—"));
-        })))));
-    }
+    if (vista === "todos") pintarTodos(r); else pintarBodega(r);
     const paginas = Math.max(1, Math.ceil(r.total / 50));
     pie.replaceChildren(h("span", { class: "suave" }, `${numero(r.total)} ${r.total === 1 ? "producto" : "productos"} · página ${pagina + 1} de ${paginas}`),
       h("div", { class: "fila" },
@@ -1641,10 +1679,11 @@ function vistaProductos({ buscar = "", filtro = "todos", pagina = 0 } = {}) {
     buscar = t; pagina = 0; cargar();
   });
   limpiezas.push(() => clearTimeout(espera));
+  const subtitulo = { todos: "Todo lo que hay en las bodegas. Tocá un producto para ver sus lotes, cajas y movimientos.",
+    grande: "Las cajas de la bodega grande, por lote.", pequena: "Lo suelto de la bodega pequeña, por lote." }[vista];
   mostrarInventario(volverInventario(),
-    h("div", { class: "encabezado" }, h("div", {}, h("h1", {}, "Productos"),
-      h("p", { class: "encabezado__sub" }, "Todo lo que hay en las bodegas. Tocá un producto para ver sus lotes, cajas y movimientos."))),
-    h("label", { class: "buscador" }, icono("buscar"), buscador), filtros, nota, contenido, pie);
+    h("div", { class: "encabezado" }, h("div", {}, h("h1", {}, "Productos"), h("p", { class: "encabezado__sub" }, subtitulo))),
+    pestanas, h("label", { class: "buscador" }, icono("buscar"), buscador), filtros, nota, contenido, pie);
   buscador.focus();
   cargar();
 }
@@ -1736,7 +1775,8 @@ async function vistaCaja(codigo, mensaje = null) {
   if (!vacia) cantidadCampo.select();
 }
 
-// Recepción: cajas iguales a la bodega grande (cada una con su etiqueta) o unidades sueltas.
+// Recepción y conteo: cajas a la bodega grande, una fila por lote (o por cantidad distinta dentro de un lote), y lo
+// que sobre suelto como un bulto con etiqueta; o unidades sueltas a la pequeña.
 async function vistaRecibir(itemCode) {
   mostrarInventario(cargando("Cargando producto…"));
   let p;
@@ -1750,36 +1790,75 @@ async function vistaRecibir(itemCode) {
   const campo = (id, etiqueta, entrada, ayuda = null) => h("label", { class: "campo-etiqueta", for: id }, h("span", {}, etiqueta), entrada,
     ayuda && h("small", { class: "suave" }, ayuda));
   const numeroCampo = (id, valor = "") => h("input", { id, class: "campo campo--numero", type: "number", min: "1", inputmode: "numeric", value: valor });
-  const cajas = numeroCampo("rec-cajas", "1");
-  const porCaja = numeroCampo("rec-por-caja", p.sugerencia?.unidadesPorCaja ? String(p.sugerencia.unidadesPorCaja) : "");
+  const textoCampo = (id) => h("input", { id, class: "campo codigo", maxlength: "60", autocomplete: "off", spellcheck: "false" });
+  const mesCampo = (id) => h("input", { id, class: "campo", type: "month" });
+  const mes = (entrada) => (entrada.value ? finDeMes(entrada.value) : null);
+
+  // Filas de cajas. La primera usa los id rec-cajas, rec-por-caja, rec-lote y rec-vence.
+  const filas = [];
+  const listaGrupos = h("ol", { class: "grupos-cajas" });
+  let siguiente = 0;
+  function agregarFila() {
+    const n = siguiente++;
+    const id = (nombre) => (n === 0 ? `rec-${nombre}` : `rec-g${n}-${nombre}`);
+    const anterior = filas.at(-1);
+    const f = { cajas: numeroCampo(id("cajas"), "1"), lote: textoCampo(id("lote")), vence: mesCampo(id("vence")),
+      porCaja: numeroCampo(id("por-caja"), anterior ? anterior.porCaja.value : p.sugerencia?.unidadesPorCaja ? String(p.sugerencia.unidadesPorCaja) : "") };
+    f.elemento = h("li", { class: "grupo-cajas" },
+      campo(id("cajas"), "Cajas", f.cajas), campo(id("por-caja"), "Unidades por caja", f.porCaja),
+      campo(id("lote"), "Lote", f.lote), campo(id("vence"), "Vence", f.vence),
+      n > 0 && boton("grupo-cajas__quitar", "borrar", "Quitar", { "aria-label": `Quitar la fila ${filas.length + 1}`,
+        onclick: () => { filas.splice(filas.indexOf(f), 1); f.elemento.remove(); pintar(); filas.at(-1).cajas.focus(); } }));
+    filas.push(f);
+    listaGrupos.append(f.elemento);
+    return f;
+  }
+  agregarFila();
+  const bultoUnidades = h("input", { id: "rec-bulto", class: "campo campo--numero", type: "number", min: "1", inputmode: "numeric", placeholder: "0" });
+  const bultoLote = textoCampo("rec-bulto-lote"), bultoVence = mesCampo("rec-bulto-vence");
   const sueltas = numeroCampo("rec-unidades", porUbicar ? String(porUbicar) : "");
-  const lote = h("input", { id: "rec-lote", class: "campo codigo", maxlength: "60", autocomplete: "off", spellcheck: "false" });
-  const vence = h("input", { id: "rec-vence", class: "campo", type: "month" });
+  const sueltoLote = textoCampo("rec-suelto-lote"), sueltoVence = mesCampo("rec-suelto-vence");
   const aPequena = h("input", { id: "rec-pequena", type: "radio", name: "destino", value: "pequena", checked: true });
   const aGrande = h("input", { id: "rec-grande", type: "radio", name: "destino", value: "grande" });
   const resumen = h("div", { class: "resumen-recepcion", "aria-live": "polite" });
   const problema = aviso("error", "", { role: "alert", hidden: true });
   const guardar = boton("boton--principal boton--grande", "impresora", "Guardar", { type: "submit" });
   const botonModo = (id, nombreIcono, texto) => h("button", { class: "segmento", type: "button", "aria-pressed": String(id === modo),
-    onclick: () => { modo = id; pintar(); (id === "cajas" ? cajas : sueltas).focus(); } }, icono(nombreIcono), texto);
+    onclick: () => { modo = id; pintar(); (id === "cajas" ? filas[0].cajas : sueltas).focus(); } }, icono(nombreIcono), texto);
   const modos = h("div", { class: "segmentos", role: "group", "aria-label": "¿Cómo vino?" });
-  const grupoCajas = h("div", { class: "rejilla-campos" }, campo("rec-cajas", "Cantidad de cajas", cajas),
-    campo("rec-por-caja", "Unidades por caja", porCaja, p.sugerencia ? `La última vez vino en cajas de ${numero(p.sugerencia.unidadesPorCaja)}.` : null));
+  const grupoCajas = h("div", {},
+    h("p", { class: "suave" }, "Una fila por cada lote. Si dentro de un lote hay cajas con distinta cantidad, poné una fila por cada cantidad.",
+      p.sugerencia ? ` La última vez vino en cajas de ${numero(p.sugerencia.unidadesPorCaja)}.` : ""),
+    listaGrupos,
+    boton("", "mas", "Agregar otro lote", { onclick: () => { agregarFila().cajas.focus(); pintar(); } }),
+    h("fieldset", { class: "bulto" }, h("legend", {}, "¿Sobraron unidades sueltas?"),
+      h("p", { class: "suave" }, "Quedan en la bodega grande como un bulto con su etiqueta. Si no sobró nada, dejalo vacío."),
+      h("div", { class: "rejilla-campos" }, campo("rec-bulto", "Unidades", bultoUnidades), campo("rec-bulto-lote", "Lote", bultoLote),
+        campo("rec-bulto-vence", "Vence", bultoVence))));
   const grupoSuelto = h("div", {}, campo("rec-unidades", "Unidades", sueltas),
     h("fieldset", { class: "destino" }, h("legend", {}, "¿Dónde se ponen?"),
       h("label", { class: "opcion", for: "rec-pequena" }, aPequena, "En la bodega pequeña"),
-      h("label", { class: "opcion", for: "rec-grande" }, aGrande, "En la bodega grande, como un bulto con etiqueta")));
+      h("label", { class: "opcion", for: "rec-grande" }, aGrande, "En la bodega grande, como un bulto con etiqueta")),
+    h("div", { class: "rejilla-campos" }, campo("rec-suelto-lote", "Lote", sueltoLote, "Como figura en el producto. Si no tiene, dejalo vacío."),
+      campo("rec-suelto-vence", "Vencimiento", sueltoVence, "Mes y año, si lo trae.")));
 
   function leer() {
-    return { modo, cajas: Number(cajas.value), unidadesPorCaja: Number(porCaja.value), unidades: Number(sueltas.value),
-      destino: aPequena.checked ? "pequena" : "grande", lote: lote.value.trim() || null, vencimiento: vence.value ? finDeMes(vence.value) : null };
+    if (modo === "cajas") {
+      return { modo: "grupos", grupos: filas.map((f) => ({ cajas: Number(f.cajas.value), unidadesPorCaja: Number(f.porCaja.value),
+        lote: f.lote.value.trim() || null, vencimiento: mes(f.vence) })),
+      bulto: bultoUnidades.value === "" ? null : { unidades: Number(bultoUnidades.value), lote: bultoLote.value.trim() || null, vencimiento: mes(bultoVence) } };
+    }
+    return { modo: "suelto", unidades: Number(sueltas.value), destino: aPequena.checked ? "pequena" : "grande",
+      lote: sueltoLote.value.trim() || null, vencimiento: mes(sueltoVence) };
   }
+  const meses = () => (modo === "cajas" ? [...filas.map((f) => f.vence), bultoVence] : [sueltoVence]);
   function pintar() {
     modos.replaceChildren(botonModo("cajas", "caja", "En cajas"), botonModo("suelto", "capas", "Suelto"));
     grupoCajas.hidden = modo !== "cajas"; grupoSuelto.hidden = modo !== "suelto";
     const d = leer();
     const r = resumenRecepcion(d);
-    const etiquetas = modo === "cajas" ? (enteroPositivo(d.cajas) ? d.cajas : 0) : d.destino === "grande" ? 1 : 0;
+    const g = d.modo === "grupos" ? armarGrupos(d.grupos, d.bulto) : null;
+    const etiquetas = g ? (g.problema ? 0 : g.etiquetas) : d.destino === "grande" ? 1 : 0;
     guardar.replaceChildren(icono(etiquetas ? "impresora" : "completa"),
       etiquetas ? `Guardar e imprimir ${numero(etiquetas)} ${etiquetas === 1 ? "etiqueta" : "etiquetas"}` : "Guardar");
     if (!r.total) return resumen.replaceChildren();
@@ -1794,15 +1873,17 @@ async function vistaRecibir(itemCode) {
   async function enviar(evento, adelantar = false) {
     evento?.preventDefault();
     const d = leer();
-    const malo = modo === "cajas"
-      ? (!enteroPositivo(d.cajas) || d.cajas > 200 ? "Escribí la cantidad de cajas (de 1 a 200)." : !enteroPositivo(d.unidadesPorCaja) ? "Escribí cuántas unidades trae cada caja." : null)
-      : (!enteroPositivo(d.unidades) ? "Escribí cuántas unidades llegaron." : null);
-    if (malo) { textoAviso(problema, malo); problema.hidden = false; return; }
-    if (vence.value && !d.vencimiento) { textoAviso(problema, "El vencimiento no es válido."); problema.hidden = false; return; }
+    let cuerpo;
+    if (d.modo === "grupos") {
+      const g = armarGrupos(d.grupos, d.bulto);
+      if (g.problema) { textoAviso(problema, g.problema); problema.hidden = false; return; }
+      cuerpo = { itemCode, modo: "grupos", grupos: g.grupos, bulto: g.bulto, adelantar };
+    } else {
+      if (!enteroPositivo(d.unidades)) { textoAviso(problema, "Escribí cuántas unidades llegaron."); problema.hidden = false; return; }
+      cuerpo = { itemCode, modo: "suelto", unidades: d.unidades, destino: d.destino, lote: d.lote, vencimiento: d.vencimiento, adelantar };
+    }
+    if (meses().some((m) => m.value && !finDeMes(m.value))) { textoAviso(problema, "Un vencimiento no es válido."); problema.hidden = false; return; }
     problema.hidden = true; guardar.disabled = true;
-    const cuerpo = modo === "cajas"
-      ? { itemCode, modo, cajas: d.cajas, unidadesPorCaja: d.unidadesPorCaja, lote: d.lote, vencimiento: d.vencimiento, adelantar }
-      : { itemCode, modo, unidades: d.unidades, destino: d.destino, lote: d.lote, vencimiento: d.vencimiento, adelantar };
     try {
       const { data } = await api.recibir(operacion.para(cuerpo));
       operacion.terminar();
@@ -1825,7 +1906,7 @@ async function vistaRecibir(itemCode) {
   const encabezadoAviso = !e ? aviso("info", "Sin comparación con SAP por ahora: se registra lo que llegó, sin controlarlo contra lo que SAP tiene por ubicar.")
     : e.estado === "por_ubicar"
     ? aviso("alerta", `SAP registró ${unidadesTexto(porUbicar)} de ${p.itemName} que todavía no se ubicaron${entradas[0] ? ` (${textoDocumento(entradas[0])}, ${fecha(entradas[0].docDate)})` : ""}.`)
-    : inicial ? aviso("info", `Conteo inicial: SAP tiene ${unidadesTexto(porUbicar)}. Registrá las cajas con su lote y lo que esté suelto; lo que falte cargar queda "sin contar".`)
+    : inicial ? aviso("info", `Conteo inicial: SAP tiene ${unidadesTexto(porUbicar)}. Contá las cajas de cada lote y lo que esté suelto; lo que falte cargar queda "sin contar".`)
       : null;
   mostrarInventario(volverA(p.itemName, () => vistaProducto(itemCode)),
     h("div", { class: "encabezado" }, h("div", {}, h("h1", {}, inicial ? "Contar" : e?.estado === "por_ubicar" ? "Ubicar lo que llegó" : "Recibir mercadería"),
@@ -1833,12 +1914,10 @@ async function vistaRecibir(itemCode) {
     encabezadoAviso,
     h("form", { class: "tarjeta formulario-recepcion", onsubmit: (evento) => enviar(evento), oninput: pintar, onchange: pintar },
       h("h2", {}, "¿Cómo vino?"), modos, grupoCajas, grupoSuelto,
-      h("div", { class: "rejilla-campos" }, campo("rec-lote", "Lote", lote, "Como figura en la caja. Si no tiene, dejalo vacío."),
-        campo("rec-vence", "Vencimiento", vence, "Mes y año, si la caja lo trae.")),
       resumen, problema,
       h("div", { class: "fila" }, guardar, boton("", null, "Cancelar", { onclick: () => vistaProducto(itemCode) }))));
   pintar();
-  (modo === "cajas" ? cajas : sueltas).focus();
+  (modo === "cajas" ? filas[0].cajas : sueltas).focus();
 }
 
 function vistaEtiquetas(cajas, producto) {
@@ -1924,7 +2003,7 @@ async function vistaPendientes(pestana = "ubicar") {
       `${numero(d.actualizando.length)} ${d.actualizando.length === 1 ? "producto tuvo" : "productos tuvieron"} cambios recientes en SAP: aparecen acá cuando termine de llegar todo (unos 15 minutos).`),
     contenido);
   if (pestana === "ubicar") {
-    contenido.replaceChildren(
+    poner(contenido,
       d.porUbicar.length ? h("ul", { class: "filas" }, d.porUbicar.map((v) => filaAdmin({ nombre: v.itemName,
         detalle: [h("span", { class: "codigo" }, v.itemCode), documentos(v)], dato: dato("Por ubicar", unidadesTexto(v.diferencia)),
         acciones: [boton("boton--principal", "caja", "Ubicar", { onclick: () => vistaRecibir(v.itemCode) }),
@@ -2165,18 +2244,41 @@ async function panelAlmacenes(panel) {
   const marcados = new Set(original);
   let todos = false;
   const filtrar = h("input", { id: "almacenes-filtrar", type: "checkbox", checked: datos.pedidosSoloDeEstaBodega });
+  // Qué almacén marcado es la bodega grande y cuál la pequeña (para ver en cada bodega lo que SAP tiene en su almacén).
+  const asignado = { grande: datos.almacenGrande ?? null, pequena: datos.almacenPequena ?? null };
+  const vigente = (codigo) => (codigo && marcados.has(codigo) ? codigo : null);
+  const selectores = { grande: h("select", { id: "almacen-grande", class: "campo" }), pequena: h("select", { id: "almacen-pequena", class: "campo" }) };
+  const nombreAlmacen = (codigo) => datos.almacenes.find((a) => a.warehouseCode === codigo)?.warehouseName ?? "";
+  function pintarBodegas() {
+    for (const [bodega, select] of Object.entries(selectores)) {
+      select.replaceChildren(h("option", { value: "" }, "Sin asignar"),
+        ...[...marcados].sort().map((codigo) => h("option", { value: codigo }, `${codigo} · ${nombreAlmacen(codigo)}`)));
+      select.value = vigente(asignado[bodega]) ?? "";
+    }
+  }
+  for (const [bodega, select] of Object.entries(selectores)) {
+    select.addEventListener("change", () => {
+      asignado[bodega] = select.value || null;
+      const otra = bodega === "grande" ? "pequena" : "grande";
+      if (asignado[otra] === asignado[bodega]) asignado[otra] = null;
+      pintarBodegas();
+      guardar.disabled = !cambiado();
+    });
+  }
   const cuerpo = h("tbody");
   const guardar = boton("boton--principal", "completa", "Guardar", { disabled: true });
   const mostrarTodos = boton("", null, "", { onclick: () => { todos = !todos; pintar(); } });
   const conDatos = (a) => a.productos > 0 || a.lineasAbiertas > 0 || original.has(a.warehouseCode);
   const ocultos = datos.almacenes.filter((a) => !conDatos(a)).length;
-  const cambiado = () => filtrar.checked !== datos.pedidosSoloDeEstaBodega || marcados.size !== original.size || [...marcados].some((c) => !original.has(c));
+  const cambiado = () => filtrar.checked !== datos.pedidosSoloDeEstaBodega || marcados.size !== original.size || [...marcados].some((c) => !original.has(c))
+    || vigente(asignado.grande) !== (datos.almacenGrande ?? null) || vigente(asignado.pequena) !== (datos.almacenPequena ?? null);
   function pintar() {
     const visibles = datos.almacenes.filter((a) => todos || conDatos(a) || marcados.has(a.warehouseCode));
     cuerpo.replaceChildren(...visibles.map((a) => {
       const id = `almacen-${a.warehouseCode.replace(/[^a-z0-9]/gi, "_")}`;
       const casilla = h("input", { id, type: "checkbox", checked: marcados.has(a.warehouseCode), onchange: (evento) => {
         if (evento.target.checked) marcados.add(a.warehouseCode); else marcados.delete(a.warehouseCode);
+        pintarBodegas();
         guardar.disabled = !cambiado();
         evento.target.closest("tr").classList.toggle("fila--marcada", evento.target.checked);
       } });
@@ -2196,7 +2298,7 @@ async function panelAlmacenes(panel) {
   guardar.addEventListener("click", async () => {
     guardar.disabled = true;
     try {
-      await api.elegirAlmacenes([...marcados], filtrar.checked);
+      await api.elegirAlmacenes([...marcados], filtrar.checked, { almacenGrande: vigente(asignado.grande), almacenPequena: vigente(asignado.pequena) });
       panel.avisar("ok", marcados.size ? `Listo: el inventario compara contra ${numero(marcados.size)} ${marcados.size === 1 ? "almacén" : "almacenes"} de SAP.`
         : "Listo: no hay almacenes elegidos; el inventario no se compara con SAP.");
       await panel.refrescar();
@@ -2213,10 +2315,16 @@ async function panelAlmacenes(panel) {
         .map((t, i) => h("th", { scope: "col", class: i >= 2 ? "tabla__numero" : null }, t)))),
       cuerpo)),
     h("div", { class: "fila fila--entre" }, mostrarTodos),
+    h("fieldset", { class: "tarjeta bodegas-almacen" }, h("legend", {}, "¿Qué almacén es cada bodega?"),
+      h("p", { class: "suave" }, "Entre los marcados. Así cada bodega muestra lo que SAP tiene en su almacén (Inventario → Productos)."),
+      h("div", { class: "rejilla-campos" },
+        h("label", { class: "campo-etiqueta", for: "almacen-grande" }, h("span", {}, "Bodega grande (cajas)"), selectores.grande),
+        h("label", { class: "campo-etiqueta", for: "almacen-pequena" }, h("span", {}, "Bodega pequeña (suelto, de donde salen los pedidos)"), selectores.pequena))),
     h("label", { class: "opcion tarjeta opcion--tarjeta", for: "almacenes-filtrar" }, filtrar, "En Pedidos, mostrar solo los pedidos que salen de los almacenes marcados"),
     h("div", { class: "fila" }, guardar),
     h("p", { class: "suave panel__nota" }, "Los nombres y cantidades salen de SAP (solo lectura). Cambiar la selección no mueve mercadería: solo cambia contra qué se compara el inventario."));
   pintar();
+  pintarBodegas();
 }
 
 // Registrar un código de barras que SAP no tiene: se escanea el envase y se elige el producto. Resuelve lo
@@ -2230,7 +2338,7 @@ function registrarCodigo({ producto = null } = {}) {
     const buscar = h("input", { id: "registro-buscar", class: "campo", type: "search", autocomplete: "off", placeholder: "Nombre o código del artículo" });
     const resultados = h("ul", { class: "resultados-producto" });
     const elegidoTexto = h("p", { class: "registro__elegido" });
-    const pintarElegido = () => elegidoTexto.replaceChildren(elegido ? [icono("completa"), h("strong", {}, elegido.itemName), " ", h("span", { class: "codigo" }, elegido.itemCode)] : "Todavía no elegiste el producto.");
+    const pintarElegido = () => poner(elegidoTexto, elegido ? [icono("completa"), h("strong", {}, elegido.itemName), " ", h("span", { class: "codigo" }, elegido.itemCode)] : "Todavía no elegiste el producto.");
     async function cargar() {
       const texto = buscar.value.trim();
       if (texto.length < 2) return resultados.replaceChildren();
