@@ -71,7 +71,9 @@ export function crearApi({ token, base = "", fetchImpl = (...args) => globalThis
     anularRevision: (pickingId) => pedir("POST", `/supervisor/revisiones/${pickingId}/anulacion`),
     sincronizacion: () => pedir("GET", "/supervisor/sincronizacion"),
     almacenes: () => pedir("GET", "/supervisor/almacenes"),
-    elegirAlmacenes: (almacenes, pedidosSoloDeEstaBodega) => pedir("PUT", "/supervisor/almacenes", { almacenes, pedidosSoloDeEstaBodega }),
+    // porBodega: { almacenGrande, almacenPequena }, qué almacén marcado es cada bodega (null: sin asignar).
+    elegirAlmacenes: (almacenes, pedidosSoloDeEstaBodega, porBodega = {}) => pedir("PUT", "/supervisor/almacenes",
+      { almacenes, pedidosSoloDeEstaBodega, ...porBodega }),
     registrarCodigo: (codigo, itemCode) => pedir("POST", "/supervisor/codigos", { codigo, itemCode }),
     // Inventario de las dos bodegas.
     inventario: () => pedir("GET", "/inventario/resumen"),
@@ -82,6 +84,9 @@ export function crearApi({ token, base = "", fetchImpl = (...args) => globalThis
       pagina: String(pagina), limit: "50", ...(buscar ? { buscar } : {}) })}`),
     // Todos los productos de las bodegas. filtro: todos, grande, pequena, solo_sap o diferencia.
     existencias: ({ buscar = "", filtro = "todos", pagina = 0 } = {}) => pedir("GET", `/inventario/existencias?${new URLSearchParams({
+      filtro, pagina: String(pagina), limit: "50", ...(buscar ? { buscar } : {}) })}`),
+    // Lo que hay en la bodega grande o la pequeña, por lote. filtro: todos, registrados o sin_registrar.
+    bodega: (bodega, { buscar = "", filtro = "todos", pagina = 0 } = {}) => pedir("GET", `/inventario/bodegas/${bodega}?${new URLSearchParams({
       filtro, pagina: String(pagina), limit: "50", ...(buscar ? { buscar } : {}) })}`),
     caja: (codigo) => pedir("GET", `/inventario/cajas/${encodeURIComponent(codigo)}`),
     porVencer: (dias) => pedir("GET", `/inventario/por-vencer?dias=${dias}`),
