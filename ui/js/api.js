@@ -80,6 +80,9 @@ export function crearApi({ token, base = "", fetchImpl = (...args) => globalThis
     pendientes: () => pedir("GET", "/inventario/pendientes"),
     conteoInicial: ({ buscar = "", pagina = 0 } = {}) => pedir("GET", `/inventario/pendientes/inicial?${new URLSearchParams({
       pagina: String(pagina), limit: "50", ...(buscar ? { buscar } : {}) })}`),
+    // Todos los productos de las bodegas. filtro: todos, grande, pequena, solo_sap o diferencia.
+    existencias: ({ buscar = "", filtro = "todos", pagina = 0 } = {}) => pedir("GET", `/inventario/existencias?${new URLSearchParams({
+      filtro, pagina: String(pagina), limit: "50", ...(buscar ? { buscar } : {}) })}`),
     caja: (codigo) => pedir("GET", `/inventario/cajas/${encodeURIComponent(codigo)}`),
     porVencer: (dias) => pedir("GET", `/inventario/por-vencer?dias=${dias}`),
     movimientos: ({ itemCode = null, antesDe = null } = {}) => pedir("GET", `/inventario/movimientos?${new URLSearchParams({
