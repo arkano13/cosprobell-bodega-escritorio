@@ -185,7 +185,8 @@ test("supervisor: textos de revisiones", () => {
 });
 
 import { PATRONES, simbolos, anchos, barras, MARGEN } from "../ui/js/code128.js";
-import { ESTADOS, armarAsignaciones, armarConteo, armarLotesDespacho, cantidadMovimiento, diasParaVencer, esCodigoCaja, finDeMes, nombreOpcion,
+import { ESTADOS, armarAsignaciones, armarConteo, armarLotesDespacho, cantidadMovimiento, diasParaVencer, esCodigoCaja, estadoFila,
+  filtrosExistencias, finDeMes, nombreOpcion,
   opcionesDescuento, quien, resumenRecepcion, revisarDespacho, sugerirAsignacion, textoAsignacion, textoDocumento, textoEstado, textoMovimiento,
   textoPorVencer, textoVencimiento, unidadesPorProducto } from "../ui/js/inventario.js";
 import { crearOperacion } from "../ui/js/operaciones.js";
@@ -348,4 +349,23 @@ test("api: cuerpos de finalizar, confirmación masiva y operaciones del inventar
     ["/inventario/cajas/9/unidades", "PUT", { operacionId: "u3", unidades: 4 }],
     ["/inventario/descuentos/4/reasignacion", "POST", { operacionId: "u4", asignaciones: [] }],
   ]);
+});
+
+test("inventario: lista de productos, filtros según SAP y estado de cada fila", async () => {
+  const conteos = { todos: 4, grande: 2, pequena: 3, solo_sap: 1, diferencia: 2 };
+  assert.deepEqual(filtrosExistencias({ conteos, almacenes: [], comparacionDisponible: false }).map((f) => f.id), ["todos", "grande", "pequena"]);
+  assert.deepEqual(filtrosExistencias({ conteos, almacenes: ["01", "02"], comparacionDisponible: false }).map((f) => [f.id, f.n]),
+    [["todos", 4], ["grande", 2], ["pequena", 3], ["solo_sap", 1]]);
+  assert.deepEqual(filtrosExistencias({ conteos, almacenes: ["01"], comparacionDisponible: true }).at(-1), { id: "diferencia", texto: "Con diferencia", n: 2 });
+  assert.deepEqual(estadoFila({ estado: "por_ubicar", diferencia: 1200 }), { tipo: "alerta", texto: "Por ubicar: 1,200" });
+  assert.deepEqual(estadoFila({ estado: "por_descontar", diferencia: -3 }), { tipo: "alerta", texto: "Por descontar: 3" });
+  assert.deepEqual(estadoFila({ estado: "conteo_inicial", diferencia: 48 }), { tipo: "gris", texto: "Sin contar" });
+  assert.deepEqual(estadoFila({ estado: "al_dia", diferencia: 0 }), { tipo: "ok", texto: "Cuadra con SAP" });
+  assert.equal(estadoFila({ estado: null, diferencia: null }), null);
+  const pedidos = [];
+  const api = crearApi({ token: "t", fetchImpl: async (url) => { pedidos.push(url); return Response.json({ data: [] }); } });
+  await api.existencias();
+  await api.existencias({ buscar: "crema 2", filtro: "solo_sap", pagina: 3 });
+  assert.deepEqual(pedidos, ["/inventario/existencias?filtro=todos&pagina=0&limit=50",
+    "/inventario/existencias?filtro=solo_sap&pagina=3&limit=50&buscar=crema+2"]);
 });

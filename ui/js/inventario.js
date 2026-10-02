@@ -227,6 +227,21 @@ export function armarLotesDespacho(elegir, asignado) {
   return { lotes };
 }
 
+// Lista de productos: los filtros que tienen sentido según haya almacenes de SAP marcados y comparación disponible.
+export function filtrosExistencias({ conteos = {}, almacenes = [], comparacionDisponible = false }) {
+  return [["todos", "Todos"], ["grande", "Bodega grande"], ["pequena", "Bodega pequeña"],
+    almacenes.length > 0 && ["solo_sap", "Solo en SAP"], comparacionDisponible && ["diferencia", "Con diferencia"]]
+    .filter(Boolean).map(([id, texto]) => ({ id, texto, n: conteos[id] ?? 0 }));
+}
+
+// Estado de una fila frente a SAP para su insignia ({ tipo, texto }), o null sin comparación.
+export function estadoFila({ estado, diferencia }) {
+  if (!estado || estado === "sin_comparacion_sap") return null;
+  const info = ESTADOS[estado] ?? { tipo: "gris", texto: estado };
+  const n = Math.abs(diferencia ?? 0);
+  return { tipo: info.tipo, texto: (estado === "por_ubicar" || estado === "por_descontar") && n ? `${info.texto}: ${numero(n)}` : info.texto };
+}
+
 // Tarjeta "Por vencer" del inicio: lotes vencidos y lotes que vencen en los próximos días.
 export function textoPorVencer({ vencidos, proximos }, dias = 60) {
   const partes = [vencidos > 0 && `${numero(vencidos)} ${vencidos === 1 ? "lote vencido" : "lotes vencidos"}`,

@@ -4,7 +4,7 @@ import { icono } from "./iconos.js";
 import { HORAS_EN_LISTA, sigueEnLista, textosPreparado } from "./preparados.js";
 import { NOMBRES_DATOS, estadoDatos, estadoOperador, puedeSerUnidad, quienConfirmo, textoCambio, textoRevision, textoSinEntrega, textoUnidad } from "./supervisor.js";
 import { ESTADOS, TEXTO_SIN_COMPARACION, armarAsignaciones, armarConteo, armarLotesDespacho, cantidadMovimiento, diasParaVencer, esCodigoCaja,
-  finDeMes, nombreOpcion, opcionesDescuento, quien, resumenRecepcion, revisarDespacho, sugerirAsignacion, textoAsignacion, textoDocumento,
+  estadoFila, filtrosExistencias, finDeMes, nombreOpcion, opcionesDescuento, quien, resumenRecepcion, revisarDespacho, sugerirAsignacion, textoAsignacion, textoDocumento,
   textoEstado, textoMovimiento, textoPorVencer, textoVencimiento, unidadesPorProducto } from "./inventario.js";
 import { crearOperacion } from "./operaciones.js";
 import { barras } from "./code128.js";
@@ -92,6 +92,7 @@ const estado = {
   ingreso: guardado.leer("ingreso"), // { token, expiraEn, operador: { id, nombre } }
   sesion: guardado.leer("sesion"), // { pickingId, docEntry, docNum }
   pendientesInventario: 0, // por ubicar + por descontar, para la insignia de la sección Inventario
+  desdeLista: null, // { buscar, filtro, pagina } si la ficha del producto se abrió desde la lista de productos
 };
 const ingresoVigente = (ingreso) => Boolean(ingreso?.token && Date.parse(ingreso.expiraEn) > Date.now());
 let api = estado.servidor && ingresoVigente(estado.ingreso) ? crearApi({ token: estado.ingreso.token, base: estado.servidor }) : null;
@@ -1325,6 +1326,7 @@ async function leerEnInventario(texto, proposito = null) {
 }
 
 async function vistaInventario() {
+  estado.desdeLista = null;
   mostrarInventario(cargando("Cargando inventario…"));
   let r;
   try { r = (await api.inventario()).data; } catch (error) { return mostrarError(error, () => vistaInventario()); }
@@ -1354,7 +1356,7 @@ async function vistaInventario() {
       accion("caja", "Recibir mercadería", "Llegaron cajas o unidades: se registran con su lote y se imprime la etiqueta de cada caja.",
         () => vistaBuscar({ proposito: "recibir" })),
       accion("mover", "Reponer", "Sacás unidades de una caja de la bodega grande y las pasás a la pequeña.", () => vistaReponer()),
-      accion("buscar", "Consultar", "Cuánto hay de un producto en cada bodega, por lote y por caja.", () => vistaBuscar({}))),
+      accion("lista", "Productos", "Todos los productos de las bodegas: cuánto hay en la grande, en la pequeña y en SAP.", () => vistaProductos())),
     h("div", { class: "pendientes" },
       comparar && pendiente("caja", "Por ubicar", p.porUbicar, "productos que SAP registró y falta ubicar", () => vistaPendientes("ubicar")),
       comparar && pendiente("restar", "Por descontar", p.porDescontar, "productos que SAP descontó: falta elegir el lote", () => vistaPendientes("descontar")),
@@ -1447,7 +1449,8 @@ async function vistaProducto(itemCode, mensaje = null) {
       }))));
 
   const ORIGEN = { sap: "SAP", ficha: "Ficha del artículo", app: "Registrado en la app" };
-  mostrarInventario(volverInventario(),
+  const lista = estado.desdeLista;
+  mostrarInventario(lista ? volverA("Productos", () => vistaProductos(lista)) : volverInventario(),
     h("div", { class: "encabezado" }, h("div", {}, h("span", { class: "rotulo" }, "Producto"), h("h1", {}, p.itemName),
       h("p", { class: "encabezado__sub" }, h("span", { class: "codigo" }, p.itemCode)))),
     mensaje && aviso(mensaje.tipo, mensaje.texto, { role: "status" }),
@@ -1561,6 +1564,89 @@ function contarPequena(p) {
   dialogo.onclose = null;
   dialogo.showModal();
   filas[0]?.unidades.focus();
+}
+
+// Todos los productos de las bodegas, sin tener que buscarlos: lo registrado en la grande y la pequeña y lo que
+// SAP tiene en los almacenes marcados. Escribir filtra la lista; un código leído con Enter abre el producto.
+function vistaProductos({ buscar = "", filtro = "todos", pagina = 0 } = {}) {
+  estado.desdeLista = null;
+  const abrir = (itemCode) => { estado.desdeLista = { buscar, filtro, pagina }; vistaProducto(itemCode); };
+  const buscador = h("input", { class: "buscador__campo", type: "search", value: buscar, autocomplete: "off", spellcheck: "false",
+    placeholder: "Buscar por nombre o código, o escaneá el producto", "aria-label": "Buscar producto" });
+  const filtros = h("div", { class: "filtros", role: "group", "aria-label": "Mostrar" });
+  const nota = h("div", {});
+  const contenido = h("div", { "aria-live": "polite" });
+  const pie = h("div", { class: "fila fila--entre" });
+  let vez = 0, espera = null;
+  async function cargar() {
+    const esta = ++vez;
+    contenido.replaceChildren(cargando("Cargando productos…"));
+    let r;
+    try { r = await api.existencias({ buscar, filtro, pagina }); } catch (error) {
+      if (error.status === 401) return mostrarError(error);
+      return contenido.replaceChildren(aviso("error", error.mensaje, { role: "alert" }));
+    }
+    if (esta !== vez) return; // ya se pidió otra búsqueda
+    const conSap = r.almacenes.length > 0, comparar = r.comparacionDisponible === true;
+    filtros.replaceChildren(...filtrosExistencias(r).map((f) => h("button", { class: "filtro", type: "button", "aria-pressed": String(f.id === filtro),
+      onclick: () => { filtro = f.id; pagina = 0; cargar(); } }, f.texto, h("span", { class: "n" }, numero(f.n)))));
+    const llegada = r.existenciasSapAl ? `recibidas ${hace(r.existenciasSapAl)}` : "sin fecha de llegada";
+    const en = r.almacenes.length === 1 ? `el almacén ${r.almacenes[0]}` : `los almacenes ${r.almacenes.slice(0, -1).join(", ")} y ${r.almacenes.at(-1)}`;
+    nota.replaceChildren(!conSap
+      ? aviso("info", "Se muestra lo registrado en la bodega grande y la pequeña. Para ver también lo que tiene SAP, el supervisor marca los almacenes de esta bodega.", {},
+        esSupervisor() && boton("", "bodega", "Elegir almacenes", { onclick: () => vistaSupervisor("almacenes") }))
+      : !comparar ? aviso("info", `"En SAP" es lo último que llegó de SAP para ${en} (existencias ${llegada}). La comparación con SAP no está disponible.`)
+        : h("p", { class: "suave nota" }, icono("info"), `"En SAP" es lo que SAP tiene en ${en} (existencias ${llegada}).`));
+    if (!r.data.length) {
+      contenido.replaceChildren(aviso("info", buscar ? `Ningún producto coincide con "${buscar}".`
+        : filtro === "todos" ? "Todavía no hay productos en las bodegas." : "No hay productos en este filtro."));
+    } else {
+      const columnas = ["Producto", "Bodega grande", "Bodega pequeña", conSap && "En SAP", comparar && "Frente a SAP"].filter(Boolean);
+      contenido.replaceChildren(h("div", { class: "tabla-envoltura" }, h("table", { class: "tabla tabla--productos" },
+        h("thead", {}, h("tr", {}, columnas.map((t) => h("th", { scope: "col", class: ["Bodega grande", "Bodega pequeña", "En SAP"].includes(t) ? "tabla__numero" : null }, t)))),
+        h("tbody", {}, r.data.map((v) => {
+          const e = estadoFila(v);
+          return h("tr", {},
+            h("th", { scope: "row" }, h("button", { class: "enlace", type: "button", onclick: () => abrir(v.itemCode) }, v.itemName),
+              h("div", { class: "codigo suave" }, v.itemCode)),
+            h("td", { class: "tabla__numero" }, h("strong", {}, numero(v.grande)),
+              v.cajas > 0 && h("div", { class: "suave" }, `${numero(v.cajas)} ${v.cajas === 1 ? "caja" : "cajas"}`)),
+            h("td", { class: "tabla__numero" }, h("strong", {}, numero(v.pequena))),
+            conSap && h("td", { class: "tabla__numero" }, numero(v.sap)),
+            comparar && h("td", {}, e ? insignia(e.tipo, e.tipo === "ok" ? "completa" : e.tipo === "gris" ? null : "alerta", e.texto) : "—"));
+        })))));
+    }
+    const paginas = Math.max(1, Math.ceil(r.total / 50));
+    pie.replaceChildren(h("span", { class: "suave" }, `${numero(r.total)} ${r.total === 1 ? "producto" : "productos"} · página ${pagina + 1} de ${paginas}`),
+      h("div", { class: "fila" },
+        boton("", "volver", "Anterior", { disabled: pagina === 0, onclick: () => { pagina--; cargar(); } }),
+        boton("", "siguiente", "Siguiente", { disabled: pagina + 1 >= paginas, onclick: () => { pagina++; cargar(); } })));
+  }
+  buscador.addEventListener("input", () => {
+    clearTimeout(espera);
+    espera = setTimeout(() => { buscar = buscador.value.trim(); pagina = 0; cargar(); }, 350);
+  });
+  // El lector termina con Enter: una caja o un código exacto abre directo; si no, queda la lista filtrada.
+  buscador.addEventListener("keydown", async (evento) => {
+    if (evento.key !== "Enter") return;
+    evento.preventDefault();
+    clearTimeout(espera);
+    const t = buscador.value.trim();
+    if (!t) return;
+    if (esCodigoCaja(t)) return vistaCaja(t.toUpperCase());
+    try {
+      const exactos = (await api.buscarProductos(t)).data.filter((p) => p.itemCode === t || p.codigos.includes(t));
+      if (exactos.length === 1) return abrir(exactos[0].itemCode);
+    } catch (error) { if (error.status === 401) return mostrarError(error); }
+    buscar = t; pagina = 0; cargar();
+  });
+  limpiezas.push(() => clearTimeout(espera));
+  mostrarInventario(volverInventario(),
+    h("div", { class: "encabezado" }, h("div", {}, h("h1", {}, "Productos"),
+      h("p", { class: "encabezado__sub" }, "Todo lo que hay en las bodegas. Tocá un producto para ver sus lotes, cajas y movimientos."))),
+    h("label", { class: "buscador" }, icono("buscar"), buscador), filtros, nota, contenido, pie);
+  buscador.focus();
+  cargar();
 }
 
 function vistaReponer() {
