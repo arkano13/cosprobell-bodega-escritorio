@@ -1573,13 +1573,15 @@ function contarPequena(p) {
   filas[0]?.unidades.focus();
 }
 
-// Productos de las bodegas sin tener que buscarlos, en tres pestañas: todos (grande, pequeña y SAP de los almacenes
-// marcados), la bodega grande y la bodega pequeña (por lote, con lo que SAP tiene en el almacén de cada una).
+// Productos de las bodegas sin tener que buscarlos, en cuatro pestañas: todos (grande, pequeña y SAP de los almacenes
+// marcados), la bodega grande y la bodega pequeña (por lote, con lo que SAP tiene en el almacén de cada una) y lo que
+// SAP tiene en cada almacén.
 // Escribir filtra la lista; un código leído con Enter abre el producto.
-const VISTAS_PRODUCTOS = [["todos", "Todos los productos"], ["grande", "Bodega grande"], ["pequena", "Bodega pequeña"]];
-function vistaProductos({ vista = "todos", buscar = "", filtro = "todos", pagina = 0 } = {}) {
+const VISTAS_PRODUCTOS = [["todos", "Todos los productos"], ["grande", "Bodega grande"], ["pequena", "Bodega pequeña"], ["almacen", "Almacenes de SAP"]];
+function vistaProductos({ vista = "todos", buscar = "", filtro = "todos", pagina = 0, almacen = null } = {}) {
   estado.desdeLista = null;
-  const abrir = (itemCode) => { estado.desdeLista = { vista, buscar, filtro, pagina }; vistaProducto(itemCode); };
+  const abrir = (itemCode) => { estado.desdeLista = { vista, buscar, filtro, pagina, almacen }; vistaProducto(itemCode); };
+  let almacenesSap = null; // la lista para elegir, se pide una vez
   const buscador = h("input", { class: "buscador__campo", type: "search", value: buscar, autocomplete: "off", spellcheck: "false",
     placeholder: "Buscar por nombre o código, o escaneá el producto", "aria-label": "Buscar producto" });
   const pestanas = h("nav", { class: "pestanas", "aria-label": "Qué mostrar" }, VISTAS_PRODUCTOS.map(([id, texto]) =>
@@ -1644,16 +1646,48 @@ function vistaProductos({ vista = "todos", buscar = "", filtro = "todos", pagina
         r.almacen && h("td", { class: "tabla__numero" }, numero(v.sap))))));
   }
 
+  // Lo que SAP tiene en un almacén: se elige el almacén y se ve producto por producto.
+  async function pedirAlmacen() {
+    almacenesSap ??= (await api.almacenesSap()).data;
+    if (!almacenesSap.some((a) => a.warehouseCode === almacen)) almacen = almacenesSap[0]?.warehouseCode ?? null;
+    return almacen ? api.productosDeAlmacen(almacen, { buscar, pagina }) : null;
+  }
+  function pintarAlmacen(r) {
+    const nombreBodega = { grande: "la bodega grande", pequena: "la bodega pequeña" };
+    const selector = h("select", { id: "productos-almacen", class: "campo", onchange: (evento) => { almacen = evento.target.value; pagina = 0; cargar(); } },
+      almacenesSap.map((a) => h("option", { value: a.warehouseCode }, `${a.warehouseCode} · ${a.warehouseName}${a.bodega ? ` (${nombreBodega[a.bodega]})` : ""}`)));
+    selector.value = almacen;
+    filtros.replaceChildren(h("label", { class: "campo-etiqueta selector-almacen", for: "productos-almacen" }, h("span", {}, "Almacén de SAP"), selector));
+    const llegadaTexto = r.existenciasSapAl ? `existencias revisadas ${hace(r.existenciasSapAl)}` : "sin fecha de llegada";
+    poner(nota, h("p", { class: "cifras-bodega" }, h("strong", {}, `${numero(r.resumen.productos)} ${r.resumen.productos === 1 ? "producto" : "productos"} · ${numero(r.resumen.unidades)} unidades en stock`)),
+      h("p", { class: "suave nota" }, icono("info"), `Lo que SAP tiene en el almacén ${r.almacen.warehouseCode} · ${r.almacen.warehouseName} (${llegadaTexto}).`,
+        r.almacen.bodega ? ` Es ${nombreBodega[r.almacen.bodega]}.` : "", " Disponible = en stock − comprometido en pedidos + pedido a proveedores."));
+    if (!r.data.length) return contenido.replaceChildren(aviso("info", buscar ? `Ningún producto coincide con "${buscar}".` : "SAP no tiene productos en este almacén."));
+    contenido.replaceChildren(tabla([["Producto"], ["En stock", true], ["Comprometido", true], ["Pedido", true], ["Disponible", true]],
+      r.data.map((v) => h("tr", {}, nombreProducto(v),
+        h("td", { class: "tabla__numero" }, h("strong", {}, numero(v.enStock))),
+        h("td", { class: "tabla__numero" }, numero(v.comprometido)),
+        h("td", { class: "tabla__numero" }, numero(v.pedido)),
+        h("td", { class: "tabla__numero" }, numero(v.disponible))))));
+  }
+
   async function cargar() {
     const esta = ++vez;
     contenido.replaceChildren(cargando("Cargando productos…"));
     let r;
-    try { r = vista === "todos" ? await api.existencias({ buscar, filtro, pagina }) : await api.bodega(vista, { buscar, filtro, pagina }); } catch (error) {
+    try {
+      r = vista === "todos" ? await api.existencias({ buscar, filtro, pagina })
+        : vista === "almacen" ? await pedirAlmacen() : await api.bodega(vista, { buscar, filtro, pagina });
+    } catch (error) {
       if (error.status === 401) return mostrarError(error);
       return contenido.replaceChildren(aviso("error", error.mensaje, { role: "alert" }));
     }
     if (esta !== vez) return; // ya se pidió otra búsqueda
-    if (vista === "todos") pintarTodos(r); else pintarBodega(r);
+    if (!r) {
+      filtros.replaceChildren(); pie.replaceChildren();
+      return contenido.replaceChildren(aviso("info", "Todavía no llegaron almacenes con existencias de SAP. Revisá en Panel → Sincronización que el puente esté enviando almacenes y existencias."));
+    }
+    if (vista === "todos") pintarTodos(r); else if (vista === "almacen") pintarAlmacen(r); else pintarBodega(r);
     const paginas = Math.max(1, Math.ceil(r.total / 50));
     pie.replaceChildren(h("span", { class: "suave" }, `${numero(r.total)} ${r.total === 1 ? "producto" : "productos"} · página ${pagina + 1} de ${paginas}`),
       h("div", { class: "fila" },
@@ -1680,7 +1714,8 @@ function vistaProductos({ vista = "todos", buscar = "", filtro = "todos", pagina
   });
   limpiezas.push(() => clearTimeout(espera));
   const subtitulo = { todos: "Todo lo que hay en las bodegas. Tocá un producto para ver sus lotes, cajas y movimientos.",
-    grande: "Las cajas de la bodega grande, por lote.", pequena: "Lo suelto de la bodega pequeña, por lote." }[vista];
+    grande: "Las cajas de la bodega grande, por lote.", pequena: "Lo suelto de la bodega pequeña, por lote.",
+    almacen: "Los productos que SAP tiene en cada almacén." }[vista];
   mostrarInventario(volverInventario(),
     h("div", { class: "encabezado" }, h("div", {}, h("h1", {}, "Productos"), h("p", { class: "encabezado__sub" }, subtitulo))),
     pestanas, h("label", { class: "buscador" }, icono("buscar"), buscador), filtros, nota, contenido, pie);
@@ -2285,6 +2320,8 @@ async function panelAlmacenes(panel) {
       return h("tr", { class: marcados.has(a.warehouseCode) ? "fila--marcada" : null },
         h("td", { class: "tabla__casilla" }, casilla),
         h("th", { scope: "row" }, h("label", { for: id }, h("strong", {}, `${a.warehouseCode} · ${a.warehouseName}`)),
+          a.productos > 0 && h("button", { class: "enlace almacen__ver", type: "button", onclick: () => vistaProductos({ vista: "almacen", almacen: a.warehouseCode }) },
+            "Ver productos"),
           h("div", { class: "suave" }, a.inactive ? insignia("gris", null, "Inactivo en SAP") : "",
             a.lineasAbiertas > 0 ? ` Salen de acá ${numero(a.lineasAbiertas)} ${a.lineasAbiertas === 1 ? "línea" : "líneas"} de pedidos abiertos` : " Sin pedidos abiertos")),
         h("td", { class: "tabla__numero" }, numero(a.productos)),
