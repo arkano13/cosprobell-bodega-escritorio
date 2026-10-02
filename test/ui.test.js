@@ -185,8 +185,10 @@ test("supervisor: textos de revisiones", () => {
 });
 
 import { PATRONES, simbolos, anchos, barras, MARGEN } from "../ui/js/code128.js";
-import { ESTADOS, armarAsignaciones, cantidadMovimiento, diasParaVencer, esCodigoCaja, finDeMes, opcionesDescuento, quien, resumenRecepcion,
-  sugerirAsignacion, textoAsignacion, textoDocumento, textoEstado, textoMovimiento, textoPorVencer, textoVencimiento } from "../ui/js/inventario.js";
+import { ESTADOS, armarAsignaciones, armarConteo, armarLotesDespacho, cantidadMovimiento, diasParaVencer, esCodigoCaja, finDeMes, nombreOpcion,
+  opcionesDescuento, quien, resumenRecepcion, revisarDespacho, sugerirAsignacion, textoAsignacion, textoDocumento, textoEstado, textoMovimiento,
+  textoPorVencer, textoVencimiento, unidadesPorProducto } from "../ui/js/inventario.js";
+import { crearOperacion } from "../ui/js/operaciones.js";
 
 test("code128: cada símbolo mide 11 módulos (el fin 13), sin repetidos, y el dígito de control es el del estándar", () => {
   assert.equal(PATRONES.length, 107);
@@ -219,7 +221,12 @@ test("inventario: textos del estado frente a SAP, movimientos y documentos", () 
   assert.equal(textoEstado({ estado: "por_ubicar", diferencia: 100, faltaEnSap: 0 }), "SAP tiene 100 unidades que todavía no se ubicaron.");
   assert.equal(textoEstado({ estado: "por_descontar", diferencia: -1, faltaEnSap: 0 }), "SAP descontó 1 unidad: falta elegir de qué lote salieron.");
   assert.equal(textoEstado({ estado: "al_dia", diferencia: 0, faltaEnSap: 20 }), "Cuadra. 20 unidades se recibieron antes que SAP las registre.");
-  assert.match(textoEstado(null), /almacenes/);
+  // Sin comparación con SAP (sin almacenes o sin existencias recientes) no hay estado, y no significa cero.
+  assert.match(textoEstado(null), /Sin comparación con SAP/);
+  assert.match(textoEstado({ estado: "sin_comparacion_sap", diferencia: null }), /funciona igual/);
+  assert.equal(ESTADOS.sin_comparacion_sap.tipo, "gris");
+  assert.equal(cantidadMovimiento({ tipo: "conteo", grande: 0, pequena: 0, cajas: 0 }), "No cambia el total");
+  assert.equal(cantidadMovimiento({ tipo: "conteo", grande: 0, pequena: -3, cajas: 0 }), "-3 u.");
   assert.equal(textoMovimiento({ tipo: "picking", docNum: 91004 }), "Salida por pedido 91004");
   assert.equal(cantidadMovimiento({ tipo: "reposicion", grande: -24, pequena: 24 }), "24 u. a la pequeña");
   assert.equal(cantidadMovimiento({ tipo: "recepcion", grande: 1000, pequena: 0, cajas: 50 }), "50 cajas · 1,000 u.");
@@ -239,25 +246,106 @@ test("inventario: resumen de una recepción en cajas o suelta", () => {
   assert.equal(resumenRecepcion({ modo: "cajas", cajas: 0, unidadesPorCaja: 20 }).total, 0);
 });
 
-test("inventario: opciones para descontar, vencidos primero; propuesta y validación de la asignación", () => {
+test("inventario: opciones para descontar, grande y después pequeña por lote, vencidos primero; propuesta y validación", () => {
   const hoy = new Date(2026, 9, 1);
   const producto = { pequena: 30, lotes: [
     { lote: "L2409-118", vencimiento: "2027-03-31", unidades: 180, cajas: [{}, {}] },
     { lote: "L2408-090", vencimiento: "2026-09-30", unidades: 100, cajas: [{}] },
     { lote: null, vencimiento: null, unidades: 4, cajas: [{}] },
+  ], lotesPequena: [
+    { id: 8, lote: null, vencimiento: null, unidades: 10 },
+    { id: 7, lote: "L2409-118", vencimiento: "2027-03-31T00:00:00.000Z", unidades: 20 },
+    { id: 9, lote: "L0", vencimiento: null, unidades: 0 },
   ] };
   const opciones = opcionesDescuento(producto, [], hoy);
   assert.deepEqual(opciones.map((o) => [o.clave, o.unidades, o.vencido]),
-    [["lote:L2408-090", 100, true], ["lote:L2409-118", 180, false], ["lote:", 4, false], ["pequena", 30, false]]);
+    [["lote:L2408-090", 100, true], ["lote:L2409-118", 180, false], ["lote:", 4, false], ["pequena:7", 20, false], ["pequena:8", 10, false]]);
+  assert.equal(opciones[3].vencimiento, "2027-03-31");
+  assert.deepEqual(opciones.map(nombreOpcion), ["Lote L2408-090", "Lote L2409-118", "Lote sin lote", "Pequeña · lote L2409-118", "Pequeña · sin lote"]);
   const propuesta = sugerirAsignacion(opciones, 120);
-  assert.deepEqual(propuesta, { "lote:L2408-090": 100, "lote:L2409-118": 20, "lote:": 0, pequena: 0 });
+  assert.deepEqual(propuesta, { "lote:L2408-090": 100, "lote:L2409-118": 20, "lote:": 0, "pequena:7": 0, "pequena:8": 0 });
   assert.deepEqual(armarAsignaciones(opciones, propuesta, 120).asignaciones,
     [{ tipo: "lote", lote: "L2408-090", unidades: 100 }, { tipo: "lote", lote: "L2409-118", unidades: 20 }]);
-  assert.match(armarAsignaciones(opciones, { ...propuesta, pequena: 5 }, 120).problema, /Asignaste 125 de 120/);
-  assert.match(armarAsignaciones(opciones, { pequena: 31 }, 31).problema, /La bodega pequeña tiene 30 unidades/);
+  // Lo que sale de la pequeña va en una sola asignación, con el detalle de cada lote.
+  const conPequena = armarAsignaciones(opciones, { "lote:": 4, "pequena:7": 20, "pequena:8": 6 }, 30);
+  assert.deepEqual(conPequena.asignaciones, [{ tipo: "lote", lote: null, unidades: 4 },
+    { tipo: "pequena", unidades: 26, lotes: [{ pequenaLoteId: 7, unidades: 20 }, { pequenaLoteId: 8, unidades: 6 }] }]);
+  assert.equal(conPequena.texto, "Lote sin lote: 4 · Pequeña · lote L2409-118: 20 · Pequeña · sin lote: 6");
+  assert.match(armarAsignaciones(opciones, { ...propuesta, "pequena:8": 5 }, 120).problema, /Asignaste 125 de 120/);
+  assert.match(armarAsignaciones(opciones, { "pequena:8": 11 }, 11).problema, /Pequeña · sin lote tiene 10 unidades/);
   assert.match(armarAsignaciones(opciones, { "lote:L2408-090": 1.5 }, 1.5).problema, /enteros/);
   // Cambiar el lote: lo que el descuento ya restó vuelve a estar disponible, aunque el lote haya quedado vacío.
-  const cambio = opcionesDescuento({ pequena: 0, lotes: [] }, [{ tipo: "lote", lote: "L1", unidades: 35 }, { tipo: "pequena", unidades: 5 }], hoy);
-  assert.deepEqual(cambio.map((o) => [o.clave, o.unidades]), [["lote:L1", 35], ["pequena", 5]]);
+  const cambio = opcionesDescuento({ pequena: 0, lotes: [], lotesPequena: [] }, [{ tipo: "lote", lote: "L1", unidades: 35 },
+    { tipo: "pequena", unidades: 5, lotesPequena: [{ pequenaLoteId: 3, lote: "L1", unidades: 5 }] }], hoy);
+  assert.deepEqual(cambio.map((o) => [o.clave, o.unidades, o.pequenaLoteId ?? null]), [["lote:L1", 35, null], ["pequena:3", 5, 3]]);
   assert.equal(textoAsignacion([{ tipo: "lote", lote: "L1", unidades: 1000 }, { tipo: "pequena", unidades: 5 }]), "L1: 1,000 · pequeña: 5");
+  assert.equal(textoAsignacion([{ tipo: "pequena", unidades: 5, lotesPequena: [{ lote: "L1", unidades: 3 }, { lote: null, unidades: 2 }] }]),
+    "pequeña L1: 3 · pequeña sin lote: 2");
+});
+
+test("inventario: conteo de la pequeña por lote", () => {
+  assert.deepEqual(armarConteo([{ lote: "L1", vencimiento: "2027-03-31", unidades: 12 }, { lote: null, vencimiento: null, unidades: 0 }]),
+    { unidades: 12, lotes: [{ lote: "L1", vencimiento: "2027-03-31", unidades: 12 }, { lote: null, vencimiento: null, unidades: 0 }] });
+  assert.deepEqual(armarConteo([]), { unidades: 0, lotes: [] });
+  assert.match(armarConteo([{ lote: "L1", unidades: 1 }, { lote: "L1", vencimiento: null, unidades: 2 }]).problema, /L1 está repetido/);
+  assert.match(armarConteo([{ lote: "L1", unidades: -1 }]).problema, /enteros/);
+  // Mismo lote con otro vencimiento es otra fila.
+  assert.equal(armarConteo([{ lote: "L1", vencimiento: "2027-01-31", unidades: 1 }, { lote: "L1", vencimiento: "2027-02-28", unidades: 1 }]).unidades, 2);
+});
+
+test("inventario: al finalizar, faltantes en la pequeña y elección de lotes", () => {
+  const porProducto = unidadesPorProducto([{ itemCode: "A", cantidadEscaneada: 4 }, { itemCode: "B", cantidadEscaneada: 0 },
+    { itemCode: "A", cantidadEscaneada: 2 }, { itemCode: "C", cantidadEscaneada: 3 }, { itemCode: "D", cantidadEscaneada: 1 }]);
+  assert.deepEqual([...porProducto], [["A", 6], ["C", 3], ["D", 1]]);
+  const fichas = new Map([
+    ["A", { itemName: "Alfa", lotesPequena: [{ id: 1, lote: "L1", unidades: 4 }, { id: 2, lote: null, unidades: 5 }, { id: 3, lote: "L0", unidades: 0 }] }],
+    ["C", { itemName: "Ce", lotesPequena: [{ id: 4, lote: "L4", unidades: 2 }] }],
+    ["D", { itemName: "De", lotesPequena: [{ id: 5, lote: "L5", unidades: 9 }] }],
+  ]);
+  const { faltantes, elegir } = revisarDespacho(porProducto, fichas);
+  assert.deepEqual(faltantes, [{ itemCode: "C", itemName: "Ce", hay: 2, necesarias: 3 }]);
+  // Un solo lote lo elige el servidor; con varios, la persona indica de cuál salió.
+  assert.deepEqual(elegir.map((p) => [p.itemCode, p.necesarias, p.lotes.map((l) => l.id)]), [["A", 6, [1, 2]]]);
+  assert.deepEqual(armarLotesDespacho(elegir, { A: { 1: 4, 2: 2 } }), { lotes: [{ itemCode: "A", lotes: [{ pequenaLoteId: 1, unidades: 4 }, { pequenaLoteId: 2, unidades: 2 }] }] });
+  assert.deepEqual(armarLotesDespacho(elegir, { A: { 1: 1, 2: 5 } }), { lotes: [{ itemCode: "A", lotes: [{ pequenaLoteId: 1, unidades: 1 }, { pequenaLoteId: 2, unidades: 5 }] }] });
+  assert.match(armarLotesDespacho(elegir, { A: { 2: 6 } }).problema, /en «Sin lote» hay 5 unidades/);
+  assert.match(armarLotesDespacho(elegir, { A: { 1: 4 } }).problema, /Alfa: asignaste 4 de 6/);
+  assert.match(armarLotesDespacho(elegir, { A: { 1: 6 } }).problema, /en el lote L1 hay 4 unidades/);
+  assert.match(armarLotesDespacho(elegir, { A: { 1: 5.5, 2: 0.5 } }).problema, /enteros/);
+  // Sin ficha (producto que no está en el inventario) es un faltante.
+  assert.deepEqual(revisarDespacho(new Map([["Z", 1]]), new Map()).faltantes, [{ itemCode: "Z", itemName: "Z", hay: 0, necesarias: 1 }]);
+});
+
+test("operaciones: el mismo contenido reusa el operacionId hasta terminar; otro contenido usa uno nuevo", () => {
+  let n = 0;
+  const operacion = crearOperacion(() => `uuid-${++n}`);
+  assert.deepEqual(operacion.para({ caja: "CJ-000001", unidades: 5 }), { operacionId: "uuid-1", caja: "CJ-000001", unidades: 5 });
+  // Reintento después de una falla temporal: misma operación, el servidor no la repite.
+  assert.equal(operacion.para({ caja: "CJ-000001", unidades: 5 }).operacionId, "uuid-1");
+  // Cambió lo que se manda: otra operación (el servidor rechazaría el mismo id con otro contenido).
+  assert.equal(operacion.para({ caja: "CJ-000001", unidades: 6 }).operacionId, "uuid-2");
+  operacion.terminar();
+  assert.equal(operacion.para({ caja: "CJ-000001", unidades: 6 }).operacionId, "uuid-3");
+  assert.match(crearOperacion().para({}).operacionId, /^[0-9a-f-]{36}$/);
+});
+
+test("api: cuerpos de finalizar, confirmación masiva y operaciones del inventario", async () => {
+  const pedidos = [];
+  const api = crearApi({ token: "t", fetchImpl: async (url, opciones) => { pedidos.push([url, opciones.method, opciones.body && JSON.parse(opciones.body)]); return Response.json({ data: {} }); } });
+  await api.finalizar(5);
+  await api.finalizar(6, [{ itemCode: "A", lotes: [{ pequenaLoteId: 1, unidades: 2 }] }]);
+  await api.confirmarManual(3, "a".repeat(64));
+  await api.reponer({ operacionId: "u1", caja: "CJ-000001", unidades: 2 });
+  await api.contarPequena("A/1", { operacionId: "u2", unidades: 0, lotes: [] });
+  await api.corregirCaja(9, { operacionId: "u3", unidades: 4 });
+  await api.cambiarLote(4, { operacionId: "u4", asignaciones: [] });
+  assert.deepEqual(pedidos, [
+    ["/picking/5/finalizar", "POST", { lotes: [] }],
+    ["/picking/6/finalizar", "POST", { lotes: [{ itemCode: "A", lotes: [{ pequenaLoteId: 1, unidades: 2 }] }] }],
+    ["/supervisor/etiquetas/confirmacion-manual", "POST", { cantidadEsperada: 3, versionEsperada: "a".repeat(64) }],
+    ["/inventario/reposiciones", "POST", { operacionId: "u1", caja: "CJ-000001", unidades: 2 }],
+    ["/inventario/productos/A%2F1/pequena", "PUT", { operacionId: "u2", unidades: 0, lotes: [] }],
+    ["/inventario/cajas/9/unidades", "PUT", { operacionId: "u3", unidades: 4 }],
+    ["/inventario/descuentos/4/reasignacion", "POST", { operacionId: "u4", asignaciones: [] }],
+  ]);
 });

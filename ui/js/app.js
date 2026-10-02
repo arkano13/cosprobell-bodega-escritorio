@@ -3,8 +3,10 @@ import { crearColaLecturas } from "./lecturas.js";
 import { icono } from "./iconos.js";
 import { HORAS_EN_LISTA, sigueEnLista, textosPreparado } from "./preparados.js";
 import { NOMBRES_DATOS, estadoDatos, estadoOperador, puedeSerUnidad, quienConfirmo, textoCambio, textoRevision, textoSinEntrega, textoUnidad } from "./supervisor.js";
-import { ESTADOS, armarAsignaciones, cantidadMovimiento, diasParaVencer, esCodigoCaja, finDeMes, opcionesDescuento, quien, resumenRecepcion,
-  sugerirAsignacion, textoAsignacion, textoDocumento, textoEstado, textoMovimiento, textoPorVencer, textoVencimiento } from "./inventario.js";
+import { ESTADOS, TEXTO_SIN_COMPARACION, armarAsignaciones, armarConteo, armarLotesDespacho, cantidadMovimiento, diasParaVencer, esCodigoCaja,
+  finDeMes, nombreOpcion, opcionesDescuento, quien, resumenRecepcion, revisarDespacho, sugerirAsignacion, textoAsignacion, textoDocumento,
+  textoEstado, textoMovimiento, textoPorVencer, textoVencimiento, unidadesPorProducto } from "./inventario.js";
+import { crearOperacion } from "./operaciones.js";
 import { barras } from "./code128.js";
 
 // ---------------------------------------------------------------------------
@@ -204,6 +206,20 @@ function confirmar({ titulo, texto, aceptar = "Aceptar", peligro = false }) {
         h("button", { class: "boton", type: "button", onclick: () => cerrar(false) }, "Cancelar"),
         h("button", { class: `boton ${peligro ? "boton--peligro" : "boton--principal"}`, type: "button", onclick: () => cerrar(true) }, aceptar)));
     dialogo.onclose = () => resolver(false);
+    dialogo.showModal();
+  });
+}
+
+// Mensaje de una operación que falló. Si fue temporal, reintentar lo mismo no la registra dos veces.
+const textoFalla = (error) => (error.temporal ? `${error.mensaje}. Probá de nuevo: no se va a registrar dos veces.` : error.mensaje);
+
+// Diálogo informativo con un solo botón.
+function informar({ titulo, texto }) {
+  return new Promise((resolver) => {
+    dialogo.replaceChildren(
+      h("div", { class: "dialogo__cuerpo" }, h("h2", {}, titulo), ...[].concat(texto).map((t) => h("p", {}, t))),
+      h("div", { class: "dialogo__acciones" }, h("button", { class: "boton boton--principal", type: "button", onclick: () => dialogo.close() }, "Entendido")));
+    dialogo.onclose = () => resolver();
     dialogo.showModal();
   });
 }
@@ -724,8 +740,12 @@ async function vistaEscaneo() {
           texto: [`Faltan ${cantidad(unidades)} unidades en ${faltantes.length} ${faltantes.length === 1 ? "línea" : "líneas"}.`,
             ...faltantes.map((l) => `• ${nombreDe(l)}: faltan ${cantidad(l.cantidadPedida - l.cantidadEscaneada)}`)] });
     if (!ok) return enfocar();
+    // Lo preparado sale de la bodega pequeña al finalizar: tiene que estar registrado ahí y, si hay varios lotes,
+    // se indica de cuál salió cada unidad.
+    const despacho = await prepararDespacho(sesion.lineas);
+    if (!despacho) return enfocar();
     try {
-      const { data } = await api.finalizar(pickingId);
+      const { data } = await api.finalizar(pickingId, despacho.lotes);
       guardarSesion(null);
       guardado.borrar(`cola.${pickingId}`);
       lecturas = null;
@@ -764,6 +784,69 @@ async function vistaEscaneo() {
   enfocar();
   if (cola.pendientes) envio.textContent = `${cola.pendientes} lecturas pendientes de enviar…`;
   cola.reanudar();
+}
+
+// Antes de cerrar una preparación: revisa la bodega pequeña de cada producto escaneado. Devuelve { lotes } para
+// enviar al finalizar, o null si falta mercadería o se canceló la elección de lotes.
+async function prepararDespacho(lineas) {
+  const porProducto = unidadesPorProducto(lineas);
+  if (!porProducto.size) return { lotes: [] };
+  let fichas;
+  try {
+    fichas = new Map((await Promise.all([...porProducto.keys()].map((itemCode) => api.producto(itemCode).then((r) => r.data))))
+      .map((p) => [p.itemCode, p]));
+  } catch (error) {
+    if (error.status === 401) { mostrarError(error); return null; }
+    return { lotes: [] }; // Sin poder revisar, el servidor decide al finalizar.
+  }
+  const { faltantes, elegir } = revisarDespacho(porProducto, fichas);
+  if (faltantes.length) {
+    await informar({ titulo: "Falta mercadería en la bodega pequeña", texto: [
+      "No se puede finalizar hasta reponer desde la bodega grande (Inventario → Reponer):",
+      ...faltantes.map((f) => `• ${f.itemName}: hay ${cantidad(f.hay)} en la pequeña y se necesitan ${cantidad(f.necesarias)}.`),
+      "La preparación queda abierta con lo escaneado." ] });
+    return null;
+  }
+  return elegir.length ? elegirLotesDespacho(elegir) : { lotes: [] };
+}
+
+// Varios lotes en la pequeña: la persona que preparó indica de cuál sacó cada unidad (el código de barras no lo dice).
+function elegirLotesDespacho(elegir) {
+  return new Promise((resolver) => {
+    let resuelto = false;
+    const cerrar = (valor) => { resuelto = true; dialogo.close(); resolver(valor); };
+    const error = aviso("error", "", { role: "alert", hidden: true });
+    const entradas = [];
+    const bloques = elegir.map((p) => h("fieldset", { class: "despacho-producto" },
+      h("legend", {}, `${p.itemName} · salen ${cantidad(p.necesarias)}`),
+      h("ul", { class: "despacho-lotes" }, p.lotes.map((l) => {
+        const id = `despacho-${entradas.length}`;
+        const entrada = h("input", { id, class: "campo campo--numero", type: "number", min: "0", max: String(l.unidades), inputmode: "numeric", placeholder: "0" });
+        entradas.push({ itemCode: p.itemCode, loteId: l.id, entrada });
+        return h("li", {}, h("label", { for: id }, h("strong", {}, l.lote ? `Lote ${l.lote}` : "Sin lote"),
+          h("span", { class: "suave" }, `${textoVencimiento(l.vencimiento)} · hay ${cantidad(l.unidades)}`)), entrada);
+      }))));
+    const leer = () => {
+      const asignado = {};
+      for (const e of entradas) (asignado[e.itemCode] ??= {})[e.loteId] = e.entrada.value === "" ? 0 : Number(e.entrada.value);
+      return asignado;
+    };
+    dialogo.replaceChildren(h("form", { class: "dialogo__formulario", onsubmit: (evento) => {
+      evento.preventDefault();
+      const r = armarLotesDespacho(elegir, leer());
+      if (r.problema) { textoAviso(error, r.problema); error.hidden = false; return; }
+      cerrar(r);
+    } },
+    h("div", { class: "dialogo__cuerpo" }, h("h2", {}, "¿De qué lote salieron?"),
+      h("p", {}, "Estos productos tienen más de un lote en la bodega pequeña. Escribí cuántas unidades tomaste de cada lote."),
+      error, bloques),
+    h("div", { class: "dialogo__acciones" },
+      h("button", { class: "boton", type: "button", onclick: () => cerrar(null) }, "Cancelar"),
+      h("button", { class: "boton boton--principal", type: "submit" }, "Finalizar"))));
+    dialogo.onclose = () => { if (!resuelto) resolver(null); };
+    dialogo.showModal();
+    entradas[0]?.entrada.focus();
+  });
 }
 
 // Historial de lecturas de una preparación (escaneo y panel del supervisor).
@@ -1001,14 +1084,20 @@ async function panelEtiquetas(panel) {
     try { await api.quitarConfirmacion(e.id); panel.avisar("ok", `${e.codigo}: confirmación quitada.`); await recargar(); } catch (error) { panel.fallo(error); }
   }
   async function confirmarTodos() {
+    // Se confirma exactamente el conjunto que vio el supervisor: misma cantidad y misma versión.
     const cantidadEsperada = conteo?.manualSinConfirmar ?? 0;
+    const versionEsperada = conteo?.versionManual;
     if (!(await confirmar({ titulo: "Confirmar todos como unidad", aceptar: `Confirmar ${numero(cantidadEsperada)}`,
       texto: [`Se van a confirmar ${numero(cantidadEsperada)} códigos con unidad Manual como unidad individual: cada lectura cuenta 1 unidad del producto.`,
         "Si alguno es de una caja, después lo podés cambiar a \"No es una unidad\" desde Confirmadas."] }))) return;
     try {
-      const { data } = await api.confirmarManual(cantidadEsperada);
+      const { data } = await api.confirmarManual(cantidadEsperada, versionEsperada);
       panel.avisar("ok", `${numero(data.confirmadas)} códigos confirmados como unidad.`);
-    } catch (error) { panel.fallo(error); }
+    } catch (error) {
+      if (error.codigo === "ETIQUETAS_CAMBIARON" || error.codigo === "CANTIDAD_CAMBIO") {
+        panel.avisar("alerta", "Los códigos cambiaron mientras los revisabas. Se actualizó la lista: revisala y confirmá de nuevo.");
+      } else panel.fallo(error);
+    }
     await recargar();
   }
 
@@ -1240,36 +1329,40 @@ async function vistaInventario() {
   let r;
   try { r = (await api.inventario()).data; } catch (error) { return mostrarError(error, () => vistaInventario()); }
   const p = r.pendientes;
-  estado.pendientesInventario = p.porUbicar + p.porDescontar;
+  // Sin comparación con SAP no hay pendientes que calcular: el inventario de la bodega funciona igual.
+  const comparar = r.comparacionDisponible === true;
+  estado.pendientesInventario = comparar ? p.porUbicar + p.porDescontar : 0;
   const sinAlmacenes = r.almacenes.length === 0;
   const lector = campoLector({ placeholder: "Escaneá la etiqueta de una caja o el código de un producto", alLeer: (t) => leerEnInventario(t) });
   const accion = (nombreIcono, titulo, texto, onclick, deshabilitado = false) => h("button", { class: "accion-inventario", type: "button", onclick,
     disabled: deshabilitado }, icono(nombreIcono), h("strong", {}, titulo), h("span", {}, texto));
+  // n null: un acceso sin cantidad (el historial), en gris.
   const pendiente = (nombreIcono, titulo, n, texto, onclick, tipo = "alerta") => h("button", {
-    class: `pendiente${n > 0 ? ` pendiente--${tipo}` : ""}`, type: "button", onclick },
-  h("span", { class: "pendiente__cabeza" }, icono(nombreIcono), titulo), h("span", { class: "pendiente__n" }, numero(n)),
+    class: `pendiente${n === null ? " pendiente--gris" : n > 0 ? ` pendiente--${tipo}` : ""}`, type: "button", onclick },
+  h("span", { class: "pendiente__cabeza" }, icono(nombreIcono), titulo), n !== null && h("span", { class: "pendiente__n" }, numero(n)),
   h("span", { class: "pendiente__texto" }, texto));
   const cifra = (n, texto) => h("div", { class: "cifra" }, h("strong", {}, numero(n)), h("span", {}, texto));
   const vencen = r.porVencer.vencidos + r.porVencer.proximos;
   mostrarInventario(
     h("div", { class: "encabezado" }, h("div", {}, h("h1", {}, "Inventario"),
       h("p", { class: "encabezado__sub" }, "Escaneá una caja o un producto, o elegí qué querés hacer."))),
-    sinAlmacenes && aviso("alerta", "Falta elegir los almacenes de SAP de esta bodega. Hasta entonces el inventario no se compara con SAP y no se puede recibir mercadería.", {},
-      esSupervisor() ? boton("boton--principal", "bodega", "Elegir almacenes", { onclick: () => vistaSupervisor("almacenes") })
-        : h("strong", {}, "Avisá al supervisor.")),
+    !comparar && aviso("info", TEXTO_SIN_COMPARACION, {},
+      sinAlmacenes && esSupervisor() && boton("", "bodega", "Elegir almacenes", { onclick: () => vistaSupervisor("almacenes") })),
+    r.pequena.negativos > 0 && aviso("alerta", `${numero(r.pequena.negativos)} ${r.pequena.negativos === 1 ? "producto tiene" : "productos tienen"} un saldo negativo antiguo en la pequeña: el supervisor tiene que contarlos por lote antes de moverlos.`),
     lector.seccion,
     h("div", { class: "acciones-inventario" },
       accion("caja", "Recibir mercadería", "Llegaron cajas o unidades: se registran con su lote y se imprime la etiqueta de cada caja.",
-        () => vistaBuscar({ proposito: "recibir" }), sinAlmacenes),
+        () => vistaBuscar({ proposito: "recibir" })),
       accion("mover", "Reponer", "Sacás unidades de una caja de la bodega grande y las pasás a la pequeña.", () => vistaReponer()),
       accion("buscar", "Consultar", "Cuánto hay de un producto en cada bodega, por lote y por caja.", () => vistaBuscar({}))),
-    !sinAlmacenes && h("div", { class: "pendientes" },
-      pendiente("caja", "Por ubicar", p.porUbicar, "productos que SAP registró y falta ubicar", () => vistaPendientes("ubicar")),
-      pendiente("restar", "Por descontar", p.porDescontar, "productos que SAP descontó: falta elegir el lote", () => vistaPendientes("descontar")),
+    h("div", { class: "pendientes" },
+      comparar && pendiente("caja", "Por ubicar", p.porUbicar, "productos que SAP registró y falta ubicar", () => vistaPendientes("ubicar")),
+      comparar && pendiente("restar", "Por descontar", p.porDescontar, "productos que SAP descontó: falta elegir el lote", () => vistaPendientes("descontar")),
       pendiente("calendario", "Por vencer", vencen, textoPorVencer(r.porVencer),
         () => vistaPorVencer(), r.porVencer.vencidos ? "error" : "alerta"),
-      pendiente("contar", "Sin contar", p.conteoInicial, "productos que SAP tiene y todavía no se contaron", () => vistaPendientes("inicial"), "gris")),
-    p.actualizando > 0 && h("p", { class: "suave nota" }, icono("info"),
+      comparar && pendiente("contar", "Sin contar", p.conteoInicial, "productos que SAP tiene y todavía no se contaron", () => vistaPendientes("inicial"), "gris"),
+      !comparar && pendiente("lista", "Descuentos hechos", null, "Historial de lo que SAP descontó y de qué lote salió.", () => vistaPendientes("historial"))),
+    comparar && p.actualizando > 0 && h("p", { class: "suave nota" }, icono("info"),
       `${numero(p.actualizando)} ${p.actualizando === 1 ? "producto tuvo" : "productos tuvieron"} cambios recientes en SAP: se revisan cuando termine de llegar todo (unos 15 minutos).`),
     h("div", { class: "bodegas" },
       h("section", { class: "tarjeta bodega" }, h("h2", {}, icono("caja"), "Bodega grande"),
@@ -1325,17 +1418,19 @@ async function vistaProducto(itemCode, mensaje = null) {
   mostrarInventario(cargando("Cargando producto…"));
   let p;
   try { p = (await api.producto(itemCode)).data; } catch (error) { return mostrarError(error, () => vistaProducto(itemCode)); }
-  const e = p.estado;
-  const info = e ? ESTADOS[e.estado] : null;
+  const e = p.estado && p.estado.estado !== "sin_comparacion_sap" ? p.estado : null;
+  const info = ESTADOS[e?.estado ?? "sin_comparacion_sap"];
   const supervisor = esSupervisor();
   const datoCifra = (titulo, valor) => h("div", {}, h("dt", {}, titulo), h("dd", { class: "datos__cifra" }, valor));
   const acciones = [
     e?.estado === "por_ubicar" && boton("boton--principal", "caja", "Ubicar lo que llegó", { onclick: () => vistaRecibir(itemCode) }),
     e?.estado === "conteo_inicial" && boton("boton--principal", "contar", "Contar este producto", { onclick: () => vistaRecibir(itemCode) }),
     e?.estado === "por_descontar" && boton("boton--principal", "restar", "Elegir de qué lote salió", { onclick: () => vistaDescontar(itemCode) }),
-    e && !["por_ubicar", "conteo_inicial"].includes(e.estado) && boton("", "caja", "Recibir mercadería", { onclick: () => vistaRecibir(itemCode) }),
-    supervisor && p.enInventario && boton("", "contar", "Contar la pequeña", { onclick: () => contarPequena(p) }),
+    !["por_ubicar", "conteo_inicial"].includes(e?.estado) && boton("", "caja", "Recibir mercadería", { onclick: () => vistaRecibir(itemCode) }),
+    supervisor && boton("", "contar", "Contar la pequeña", { onclick: () => contarPequena(p) }),
   ].filter(Boolean);
+  const enGrande = p.lotes.reduce((t, l) => t + l.unidades, 0);
+  const lotesPequena = (p.lotesPequena ?? []).filter((l) => l.unidades > 0);
 
   const lotes = p.lotes.length === 0 ? h("p", { class: "suave" }, "No hay cajas de este producto en la bodega grande.")
     : h("div", { class: "tabla-envoltura" }, h("table", { class: "tabla" },
@@ -1361,14 +1456,25 @@ async function vistaProducto(itemCode, mensaje = null) {
         h("div", {}, h("span", { class: "rotulo" }, "Frente a SAP"), info && insignia(info.tipo, info.tipo === "ok" ? "completa" : info.tipo === "gris" ? null : "alerta", info.texto)),
         h("div", { class: "fila-admin__acciones" }, acciones)),
       h("p", { class: "estado-producto__texto" }, textoEstado(e)),
-      e && h("dl", { class: "datos" },
+      e ? h("dl", { class: "datos" },
         datoCifra("En SAP", numero(e.enSap)), datoCifra("Bodega grande", numero(e.grande)), datoCifra("Bodega pequeña", numero(e.pequena)),
         e.sinEntrega > 0 && datoCifra("Preparado sin entregar", numero(e.sinEntrega)),
-        e.diferencia !== 0 && datoCifra(e.diferencia > 0 ? "Por ubicar" : "Por descontar", numero(Math.abs(e.diferencia))))),
+        e.diferencia !== 0 && datoCifra(e.diferencia > 0 ? "Por ubicar" : "Por descontar", numero(Math.abs(e.diferencia))))
+        : h("dl", { class: "datos" }, datoCifra("Bodega grande", numero(enGrande)), datoCifra("Bodega pequeña", numero(p.pequena)))),
     h("section", { class: "bloque" }, h("h2", {}, icono("caja"), "Bodega grande, por lote"), lotes),
     h("section", { class: "bloque" }, h("h2", {}, icono("capas"), "Bodega pequeña"),
       h("p", { class: "cifra-grande" }, h("strong", {}, numero(p.pequena)), " ", Math.abs(p.pequena) === 1 ? "unidad" : "unidades"),
-      p.pequena < 0 && aviso("alerta", "Salieron más unidades de las que se registraron en la pequeña: falta registrar una reposición o contar la pequeña.")),
+      p.pequena < 0 && aviso("alerta", "Hay un saldo negativo antiguo en la pequeña. Hasta que el supervisor la cuente por lote no se puede reponer ni recibir a la pequeña."),
+      lotesPequena.length > 0 && h("div", { class: "tabla-envoltura" }, h("table", { class: "tabla" },
+        h("thead", {}, h("tr", {}, ["Lote", "Vence", "Unidades"].map((t) => h("th", { scope: "col", class: t === "Unidades" ? "tabla__numero" : null }, t)))),
+        h("tbody", {}, lotesPequena.map((l) => {
+          const dias = diasParaVencer(l.vencimiento);
+          return h("tr", {}, h("th", { scope: "row", class: "codigo" }, l.lote ?? "Sin lote"),
+            h("td", {}, textoVencimiento(l.vencimiento), dias !== null && dias < 0 && h("span", {}, " ", insignia("error", "alerta", "Vencido"))),
+            h("td", { class: "tabla__numero" }, h("strong", {}, numero(l.unidades))));
+        })))),
+      lotesPequena.some((l) => !l.lote) && h("p", { class: "suave nota" }, icono("info"),
+        "«Sin lote» incluye lo que había en la pequeña antes del control por lotes. Al contar la pequeña se puede repartir en sus lotes.")),
     h("section", { class: "bloque" }, h("div", { class: "fila fila--entre" }, h("h2", {}, icono("escaner"), "Códigos de barras"),
       supervisor && boton("", "mas", "Registrar un código", { onclick: async () => {
         const registrado = await registrarCodigo({ producto: p });
@@ -1383,16 +1489,78 @@ async function vistaProducto(itemCode, mensaje = null) {
     h("section", { class: "bloque" }, h("h2", {}, icono("actualizar"), "Movimientos"), tablaMovimientos(p.movimientos, { conProducto: false })));
 }
 
-async function contarPequena(p) {
-  const datos = await pedirDatos({ titulo: "Contar la bodega pequeña", aceptar: "Guardar conteo",
-    texto: `${p.itemName}: el sistema tiene ${unidadesTexto(p.pequena)} en la pequeña. Escribí cuántas contaste.`,
-    campos: [{ nombre: "unidades", etiqueta: "Unidades contadas", inputmode: "numeric", maxlength: 7 }],
-    validar: (d) => (/^\d+$/.test(d.unidades) ? null : "Escribí un número entero, sin puntos ni comas.") });
-  if (!datos) return;
-  try {
-    const { data } = await api.contarPequena(p.itemCode, Number(datos.unidades));
-    vistaProducto(p.itemCode, { tipo: "ok", texto: data.cambio === 0 ? "El conteo coincide con el sistema." : `La pequeña quedó en ${unidadesTexto(data.pequena)} (${data.cambio > 0 ? "+" : ""}${numero(data.cambio)}).` });
-  } catch (error) { mostrarError(error, () => vistaProducto(p.itemCode)); }
+// Conteo de la pequeña por lote (supervisor): una fila por lote que el sistema conoce y las que se agreguen.
+// Se manda el detalle siempre, así la pequeña conserva de qué lote es cada unidad.
+function contarPequena(p) {
+  const operacion = crearOperacion();
+  const error = aviso("error", "", { role: "alert", hidden: true });
+  const total = h("p", { class: "conteo__total", "aria-live": "polite" });
+  const lista = h("ul", { class: "conteo-lotes" });
+  const filas = [];
+  let n = 0;
+  function agregar(lote = null) {
+    const id = `conteo-${n++}`;
+    const unidades = h("input", { id: `${id}-u`, class: "campo campo--numero", type: "number", min: "0", inputmode: "numeric",
+      placeholder: lote ? `sistema: ${numero(lote.unidades)}` : "0" });
+    const fila = { lote, unidades };
+    if (lote) {
+      lista.append(h("li", {}, h("label", { for: `${id}-u` }, h("strong", {}, lote.lote ? `Lote ${lote.lote}` : "Sin lote"),
+        h("span", { class: "suave" }, textoVencimiento(lote.vencimiento))), unidades));
+    } else {
+      fila.nombre = h("input", { id: `${id}-l`, class: "campo codigo", maxlength: "60", autocomplete: "off", spellcheck: "false", placeholder: "Sin lote" });
+      fila.vence = h("input", { id: `${id}-v`, class: "campo", type: "month" });
+      lista.append(h("li", { class: "conteo-lotes__nuevo" },
+        h("label", { for: `${id}-l` }, h("span", {}, "Lote"), fila.nombre),
+        h("label", { for: `${id}-v` }, h("span", {}, "Vence"), fila.vence),
+        h("label", { for: `${id}-u` }, h("span", {}, "Unidades"), unidades)));
+    }
+    filas.push(fila);
+    pintar();
+    return unidades;
+  }
+  function leer() {
+    const vacios = filas.some((f) => f.unidades.value === "" && (f.lote || f.nombre.value.trim()));
+    if (vacios) return { problema: "Escribí cuántas unidades hay de cada lote (0 si no hay ninguna)." };
+    return armarConteo(filas.filter((f) => f.unidades.value !== "").map((f) => ({
+      lote: f.lote ? f.lote.lote ?? null : f.nombre.value.trim() || null,
+      vencimiento: f.lote ? (f.lote.vencimiento ? String(f.lote.vencimiento).slice(0, 10) : null) : (f.vence.value ? finDeMes(f.vence.value) : null),
+      unidades: Number(f.unidades.value) })));
+  }
+  function pintar() {
+    const r = leer();
+    total.textContent = r.problema ? "" : `Total contado: ${unidadesTexto(r.unidades)} (el sistema tiene ${numero(p.pequena)}).`;
+  }
+  const existentes = (p.lotesPequena ?? []).filter((l) => l.unidades > 0);
+  for (const l of existentes) agregar(l);
+  if (!existentes.length) agregar();
+  const guardar = h("button", { class: "boton boton--principal", type: "submit" }, "Guardar conteo");
+  dialogo.replaceChildren(h("form", { class: "dialogo__formulario", oninput: pintar, onsubmit: async (evento) => {
+    evento.preventDefault();
+    const r = leer();
+    if (r.problema) { textoAviso(error, r.problema); error.hidden = false; return; }
+    error.hidden = true; guardar.disabled = true;
+    try {
+      const { data } = await api.contarPequena(p.itemCode, operacion.para({ unidades: r.unidades, lotes: r.lotes }));
+      operacion.terminar();
+      dialogo.close();
+      vistaProducto(p.itemCode, { tipo: "ok", texto: data.cambio === 0 ? "Conteo guardado: el total coincide con el sistema."
+        : `La pequeña quedó en ${unidadesTexto(data.pequena)} (${data.cambio > 0 ? "+" : ""}${numero(data.cambio)}).` });
+    } catch (e) {
+      guardar.disabled = false;
+      if (e.status === 401) { dialogo.close(); return mostrarError(e); }
+      textoAviso(error, textoFalla(e)); error.hidden = false;
+    }
+  } },
+  h("div", { class: "dialogo__cuerpo" }, h("h2", {}, "Contar la bodega pequeña"),
+    h("p", {}, `${p.itemName}. Contá cada lote por separado. Si encontrás un lote que no está en la lista, agregalo.`),
+    error, lista,
+    h("button", { class: "boton", type: "button", onclick: () => agregar().focus() }, icono("mas"), "Agregar un lote"),
+    total),
+  h("div", { class: "dialogo__acciones" },
+    h("button", { class: "boton", type: "button", onclick: () => dialogo.close() }, "Cancelar"), guardar)));
+  dialogo.onclose = null;
+  dialogo.showModal();
+  filas[0]?.unidades.focus();
 }
 
 function vistaReponer() {
@@ -1421,6 +1589,8 @@ async function vistaCaja(codigo, mensaje = null) {
     value: String(c.unidades), inputmode: "numeric", disabled: vacia });
   const problema = aviso("error", "", { role: "alert", hidden: true });
   const pasar = boton("boton--principal boton--grande", "mover", "Pasar a la pequeña", { type: "submit", disabled: vacia });
+  // Un reintento con la misma cantidad reusa la operación: el servidor no la repite.
+  const reposicion = crearOperacion(), correccion = crearOperacion();
   async function reponer(evento) {
     evento.preventDefault();
     const n = Number(cantidadCampo.value);
@@ -1429,11 +1599,12 @@ async function vistaCaja(codigo, mensaje = null) {
     }
     pasar.disabled = true; problema.hidden = true;
     try {
-      const { data } = await api.reponer(c.codigo, n);
+      const { data } = await api.reponer(reposicion.para({ caja: c.codigo, unidades: n }));
+      reposicion.terminar();
       vistaCaja(c.codigo, { tipo: "ok", texto: `Pasaron ${unidadesTexto(n)} a la bodega pequeña. La caja quedó con ${numero(data.caja.unidades)} y la pequeña tiene ${numero(data.pequena)}.` });
     } catch (error) {
       if (error.status === 401) return mostrarError(error);
-      textoAviso(problema, error.mensaje); problema.hidden = false; pasar.disabled = false;
+      textoAviso(problema, textoFalla(error)); problema.hidden = false; pasar.disabled = false;
     }
   }
   async function corregir() {
@@ -1442,10 +1613,16 @@ async function vistaCaja(codigo, mensaje = null) {
       campos: [{ nombre: "unidades", etiqueta: "Unidades en la caja", inputmode: "numeric", maxlength: 7 }],
       validar: (d) => (/^\d+$/.test(d.unidades) ? null : "Escribí un número entero, sin puntos ni comas.") });
     if (!datos) return;
+    const unidades = Number(datos.unidades);
     try {
-      await api.corregirCaja(c.id, Number(datos.unidades));
-      vistaCaja(c.codigo, { tipo: "ok", texto: `La caja quedó con ${unidadesTexto(Number(datos.unidades))}.` });
-    } catch (error) { mostrarError(error, () => vistaCaja(c.codigo)); }
+      await api.corregirCaja(c.id, correccion.para({ unidades }));
+      correccion.terminar();
+      vistaCaja(c.codigo, { tipo: "ok", texto: `La caja quedó con ${unidadesTexto(unidades)}.` });
+    } catch (error) {
+      if (error.status === 401) return mostrarError(error);
+      // Si se vuelve a guardar el mismo número, va la misma operación: no se aplica dos veces.
+      informar({ titulo: "No se guardó la corrección", texto: textoFalla(error) });
+    }
   }
   const antes = c.usarAntes;
   mostrarInventario(volverA("Reponer", () => vistaReponer()),
@@ -1478,10 +1655,11 @@ async function vistaRecibir(itemCode) {
   mostrarInventario(cargando("Cargando producto…"));
   let p;
   try { p = (await api.producto(itemCode)).data; } catch (error) { return mostrarError(error, () => vistaRecibir(itemCode)); }
-  const e = p.estado;
-  if (!e) return vistaInventario();
-  const porUbicar = Math.max(0, e.diferencia);
-  const inicial = e.estado === "conteo_inicial";
+  // Sin comparación con SAP se recibe igual, sin controlar contra lo que SAP tiene por ubicar.
+  const e = p.estado && p.estado.estado !== "sin_comparacion_sap" ? p.estado : null;
+  const porUbicar = e ? Math.max(0, e.diferencia) : 0;
+  const inicial = e?.estado === "conteo_inicial";
+  const operacion = crearOperacion();
   let modo = "cajas";
   const campo = (id, etiqueta, entrada, ayuda = null) => h("label", { class: "campo-etiqueta", for: id }, h("span", {}, etiqueta), entrada,
     ayuda && h("small", { class: "suave" }, ayuda));
@@ -1519,6 +1697,7 @@ async function vistaRecibir(itemCode) {
     guardar.replaceChildren(icono(etiquetas ? "impresora" : "completa"),
       etiquetas ? `Guardar e imprimir ${numero(etiquetas)} ${etiquetas === 1 ? "etiqueta" : "etiquetas"}` : "Guardar");
     if (!r.total) return resumen.replaceChildren();
+    if (!e) return resumen.replaceChildren(aviso("info", r.texto));
     const base = inicial ? `SAP tiene ${numero(porUbicar)} sin contar.` : `SAP tiene ${numero(porUbicar)} por ubicar.`;
     if (porUbicar === 0) return resumen.replaceChildren(aviso("alerta", `${r.texto} SAP todavía no registró mercadería por ubicar de este producto: si llegó antes que SAP, se puede recibir igual.`));
     if (r.total > porUbicar) return resumen.replaceChildren(aviso("alerta", `${r.texto} Son ${numero(r.total - porUbicar)} más de lo que SAP tiene ${inicial ? "sin contar" : "por ubicar"} (${numero(porUbicar)}).`));
@@ -1539,7 +1718,8 @@ async function vistaRecibir(itemCode) {
       ? { itemCode, modo, cajas: d.cajas, unidadesPorCaja: d.unidadesPorCaja, lote: d.lote, vencimiento: d.vencimiento, adelantar }
       : { itemCode, modo, unidades: d.unidades, destino: d.destino, lote: d.lote, vencimiento: d.vencimiento, adelantar };
     try {
-      const { data } = await api.recibir(cuerpo);
+      const { data } = await api.recibir(operacion.para(cuerpo));
+      operacion.terminar();
       if (data.cajas.length) return vistaEtiquetas(data.cajas, p);
       vistaProducto(itemCode, { tipo: "ok", texto: `Se recibieron ${unidadesTexto(data.unidades)} sueltas en la bodega pequeña.` });
     } catch (error) {
@@ -1551,17 +1731,18 @@ async function vistaRecibir(itemCode) {
         if (seguir) return enviar(null, true);
         return;
       }
-      textoAviso(problema, error.mensaje); problema.hidden = false;
+      textoAviso(problema, textoFalla(error)); problema.hidden = false;
     }
   }
 
   const entradas = p.documentos.filter((d) => d.tipo.startsWith("entrada") || d.tipo === "devolucionCliente");
-  const encabezadoAviso = e.estado === "por_ubicar"
+  const encabezadoAviso = !e ? aviso("info", "Sin comparación con SAP por ahora: se registra lo que llegó, sin controlarlo contra lo que SAP tiene por ubicar.")
+    : e.estado === "por_ubicar"
     ? aviso("alerta", `SAP registró ${unidadesTexto(porUbicar)} de ${p.itemName} que todavía no se ubicaron${entradas[0] ? ` (${textoDocumento(entradas[0])}, ${fecha(entradas[0].docDate)})` : ""}.`)
     : inicial ? aviso("info", `Conteo inicial: SAP tiene ${unidadesTexto(porUbicar)}. Registrá las cajas con su lote y lo que esté suelto; lo que falte cargar queda "sin contar".`)
       : null;
   mostrarInventario(volverA(p.itemName, () => vistaProducto(itemCode)),
-    h("div", { class: "encabezado" }, h("div", {}, h("h1", {}, inicial ? "Contar" : e.estado === "por_ubicar" ? "Ubicar lo que llegó" : "Recibir mercadería"),
+    h("div", { class: "encabezado" }, h("div", {}, h("h1", {}, inicial ? "Contar" : e?.estado === "por_ubicar" ? "Ubicar lo que llegó" : "Recibir mercadería"),
       h("p", { class: "encabezado__sub" }, p.itemName, " · ", h("span", { class: "codigo" }, p.itemCode)))),
     encabezadoAviso,
     h("form", { class: "tarjeta formulario-recepcion", onsubmit: (evento) => enviar(evento), oninput: pintar, onchange: pintar },
@@ -1641,7 +1822,7 @@ async function vistaPendientes(pestana = "ubicar") {
   mostrarInventario(cargando("Cargando pendientes…"));
   let d;
   try { d = (await api.pendientes()).data; } catch (error) {
-    if (error.codigo === "ALMACENES_SIN_ELEGIR") return vistaInventario();
+    if (SIN_COMPARACION.includes(error.codigo)) return pendientesSinComparacion(error);
     return mostrarError(error, () => vistaPendientes(pestana));
   }
   estado.pendientesInventario = d.porUbicar.length + d.porDescontar.length;
@@ -1678,6 +1859,18 @@ async function vistaPendientes(pestana = "ubicar") {
   } else {
     await listaDescuentos(contenido);
   }
+}
+
+// Sin almacenes o sin datos recientes de SAP no hay pendientes que calcular; el historial de descuentos sigue.
+const SIN_COMPARACION = ["ALMACENES_SIN_ELEGIR", "COMPARACION_SAP_NO_DISPONIBLE"];
+async function pendientesSinComparacion(error) {
+  estado.pendientesInventario = 0;
+  const contenido = h("div", {});
+  mostrarInventario(volverInventario(), h("div", { class: "encabezado" }, h("h1", {}, "Descuentos hechos")),
+    aviso("info", `${error.mensaje} Por ubicar, por descontar y sin contar vuelven a aparecer cuando haya comparación con SAP.`, {},
+      error.codigo === "ALMACENES_SIN_ELEGIR" && esSupervisor() && boton("", "bodega", "Elegir almacenes", { onclick: () => vistaSupervisor("almacenes") })),
+    contenido);
+  await listaDescuentos(contenido);
 }
 
 async function listaConteoInicial(contenedor) {
@@ -1742,10 +1935,19 @@ async function vistaDescontar(itemCode, { descuento = null } = {}) {
   const total = descuento ? descuento.unidades : Math.max(0, -(p.estado?.diferencia ?? 0));
   if (!descuento && p.estado?.estado !== "por_descontar") {
     const actualizando = p.estado?.estado === "actualizando";
+    const sinComparar = !p.estado || p.estado.estado === "sin_comparacion_sap";
     return mostrarInventario(volver, h("div", { class: "encabezado" }, h("h1", {}, p.itemName)),
-      aviso(actualizando ? "alerta" : "ok", actualizando ? "SAP se está actualizando para este producto. Probá en unos minutos." : "Ya no hay nada por descontar de este producto."),
+      sinComparar ? aviso("info", TEXTO_SIN_COMPARACION)
+        : aviso(actualizando ? "alerta" : "ok", actualizando ? "SAP se está actualizando para este producto. Probá en unos minutos." : "Ya no hay nada por descontar de este producto."),
       boton("", "siguiente", "Ver el producto", { onclick: () => vistaProducto(itemCode) }));
   }
+  // Un descuento anterior al control por lotes no dice de qué lote de la pequeña salió: no se puede cambiar desde acá.
+  if (descuento?.asignacion.some((a) => a.tipo === "pequena" && (a.lotesPequena ?? []).some((l) => !l.pequenaLoteId))) {
+    return mostrarInventario(volver, h("div", { class: "encabezado" }, h("h1", {}, "Cambiar lote")),
+      aviso("alerta", "Este descuento es de antes del control por lotes y no dice de qué lote de la pequeña salió. No se puede cambiar el lote; si hace falta, el supervisor cuenta la pequeña por lote."),
+      boton("", "siguiente", "Ver el producto", { onclick: () => vistaProducto(itemCode) }));
+  }
+  const operacion = crearOperacion();
   const opciones = opcionesDescuento(p, descuento?.asignacion ?? []);
   const asignado = sugerirAsignacion(opciones, total);
   const resumen = h("div", { "aria-live": "polite" });
@@ -1756,9 +1958,9 @@ async function vistaDescontar(itemCode, { descuento = null } = {}) {
     const id = `asignar-${o.clave.replace(/[^a-z0-9]/gi, "_")}`;
     const entrada = h("input", { id, class: "campo campo--numero", type: "number", min: "0", max: String(o.unidades), inputmode: "numeric", value: String(asignado[o.clave] ?? 0) });
     campos.set(o.clave, entrada);
-    const nombre = o.tipo === "pequena" ? "Bodega pequeña" : `Lote ${o.lote ?? "sin lote"}`;
-    const detalle = o.tipo === "pequena" ? "Unidades sueltas"
-      : [o.vencimiento && !o.vencido && `Vence ${textoVencimiento(o.vencimiento)}`, `${numero(o.cajas.length)} ${o.cajas.length === 1 ? "caja" : "cajas"} en la bodega grande`].filter(Boolean).join(" · ");
+    const nombre = nombreOpcion(o);
+    const detalle = [o.vencimiento && !o.vencido && `Vence ${textoVencimiento(o.vencimiento)}`,
+      o.tipo === "pequena" ? "Sueltas en la bodega pequeña" : `${numero(o.cajas.length)} ${o.cajas.length === 1 ? "caja" : "cajas"} en la bodega grande`].filter(Boolean).join(" · ");
     return h("li", { class: `opcion-lote${o.vencido ? " opcion-lote--vencida" : ""}` },
       h("div", {}, h("div", { class: "opcion-lote__nombre" }, nombre, o.vencido && insignia("error", "alerta", `Venció ${textoVencimiento(o.vencimiento)}`)),
         h("div", { class: "suave" }, detalle)),
@@ -1768,7 +1970,7 @@ async function vistaDescontar(itemCode, { descuento = null } = {}) {
   const leer = () => Object.fromEntries([...campos].map(([clave, entrada]) => [clave, entrada.value === "" ? 0 : Number(entrada.value)]));
   function pintar() {
     const r = armarAsignaciones(opciones, leer(), total);
-    resumen.replaceChildren(r.problema ? aviso("alerta", r.problema) : aviso("ok", `${numero(total)} de ${numero(total)} asignadas: ${textoAsignacion(r.asignaciones)}.`));
+    resumen.replaceChildren(r.problema ? aviso("alerta", r.problema) : aviso("ok", `${numero(total)} de ${numero(total)} asignadas: ${r.texto}.`));
     confirmarBoton.disabled = Boolean(r.problema);
   }
   async function enviar(evento) {
@@ -1778,14 +1980,18 @@ async function vistaDescontar(itemCode, { descuento = null } = {}) {
     confirmarBoton.disabled = true; problema.hidden = true;
     try {
       if (descuento) {
-        await api.cambiarLote(descuento.id, r.asignaciones);
+        await api.cambiarLote(descuento.id, operacion.para({ asignaciones: r.asignaciones }));
+        operacion.terminar();
         return vistaPendientes("historial");
       }
-      const { data } = await api.descontar(itemCode, total, r.asignaciones);
-      vistaRetirar(p, data.retirar, textoAsignacion(r.asignaciones));
+      const { data } = await api.descontar(operacion.para({ itemCode, unidades: total, asignaciones: r.asignaciones }));
+      operacion.terminar();
+      vistaRetirar(p, data.retirar, r.texto);
     } catch (error) {
       if (error.status === 401) return mostrarError(error);
-      textoAviso(problema, error.codigo === "CANTIDAD_CAMBIO" ? `${error.mensaje} Volvé a abrir el producto para ver la cantidad actual.` : error.mensaje);
+      textoAviso(problema, error.codigo === "CANTIDAD_CAMBIO" ? `${error.mensaje} Volvé a abrir el producto para ver la cantidad actual.`
+        : ["LOTE_INSUFICIENTE", "PEQUENA_INSUFICIENTE"].includes(error.codigo) ? `${error.mensaje} Volvé a abrir el producto para ver lo que hay ahora.`
+          : textoFalla(error));
       problema.hidden = false; confirmarBoton.disabled = false;
     }
   }
@@ -1799,7 +2005,7 @@ async function vistaDescontar(itemCode, { descuento = null } = {}) {
     aviso("alerta", textoSap),
     h("form", { class: "tarjeta", onsubmit: enviar, oninput: pintar },
       h("h2", {}, "¿De dónde salió?"),
-      h("p", { class: "suave" }, "SAP no maneja lotes: elegí de cuáles salió. La lista va del que vence primero al último. Si salió de varios lugares, repartí hasta llegar al total."),
+      h("p", { class: "suave" }, "SAP no maneja lotes: elegí de cuáles salió. Primero están los lotes de la bodega grande y después los de la pequeña, cada uno del que vence primero al último. Si salió de varios lugares, repartí hasta llegar al total."),
       h("ul", { class: "opciones-lote" }, filas), resumen, problema,
       h("div", { class: "fila" }, confirmarBoton, boton("", null, "Cancelar", { onclick: () => vistaPendientes(descuento ? "historial" : "descontar") }))));
   pintar();
@@ -1827,7 +2033,7 @@ async function vistaPorVencer(dias = 60) {
   const vencidos = lotes.filter((l) => l.vencido).length;
   mostrarInventario(volverInventario(),
     h("div", { class: "encabezado" }, h("div", {}, h("h1", {}, "Por vencer"),
-      h("p", { class: "encabezado__sub" }, "Lotes de la bodega grande, del que vence primero al último. Lo vencido aparece siempre."))),
+      h("p", { class: "encabezado__sub" }, "Lotes de las dos bodegas, del que vence primero al último. Lo vencido aparece siempre."))),
     filtros,
     vencidos > 0 && aviso("error", `${numero(vencidos)} ${vencidos === 1 ? "lote está vencido" : "lotes están vencidos"}. Para sacarlos, primero se registra la salida en SAP; después aparecen en "Por descontar".`),
     lotes.length === 0 ? aviso("ok", `Ningún lote vence en los próximos ${dias} días.`)
