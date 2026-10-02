@@ -88,6 +88,10 @@ export function crearApi({ token, base = "", fetchImpl = (...args) => globalThis
     // Lo que hay en la bodega grande o la pequeña, por lote. filtro: todos, registrados o sin_registrar.
     bodega: (bodega, { buscar = "", filtro = "todos", pagina = 0 } = {}) => pedir("GET", `/inventario/bodegas/${bodega}?${new URLSearchParams({
       filtro, pagina: String(pagina), limit: "50", ...(buscar ? { buscar } : {}) })}`),
+    // Almacenes de SAP (marcados y con existencia) y los productos que SAP tiene en uno.
+    almacenesSap: () => pedir("GET", "/inventario/almacenes"),
+    productosDeAlmacen: (codigo, { buscar = "", pagina = 0 } = {}) => pedir("GET", `/inventario/almacenes/${encodeURIComponent(codigo)}/productos?${new URLSearchParams({
+      pagina: String(pagina), limit: "50", ...(buscar ? { buscar } : {}) })}`),
     caja: (codigo) => pedir("GET", `/inventario/cajas/${encodeURIComponent(codigo)}`),
     porVencer: (dias) => pedir("GET", `/inventario/por-vencer?dias=${dias}`),
     movimientos: ({ itemCode = null, antesDe = null } = {}) => pedir("GET", `/inventario/movimientos?${new URLSearchParams({

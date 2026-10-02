@@ -407,3 +407,13 @@ test("inventario: vista de cada bodega, filtros y texto de cada lote", async () 
     ["/supervisor/almacenes", { almacenes: ["01"], pedidosSoloDeEstaBodega: false }],
   ]);
 });
+
+test("api: almacenes de SAP y los productos de uno", async () => {
+  const pedidos = [];
+  const api = crearApi({ token: "t", fetchImpl: async (url) => { pedidos.push(url); return Response.json({ data: [] }); } });
+  await api.almacenesSap();
+  await api.productosDeAlmacen("01");
+  await api.productosDeAlmacen("V 05", { buscar: "crema", pagina: 2 });
+  assert.deepEqual(pedidos, ["/inventario/almacenes", "/inventario/almacenes/01/productos?pagina=0&limit=50",
+    "/inventario/almacenes/V%2005/productos?pagina=2&limit=50&buscar=crema"]);
+});
