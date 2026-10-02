@@ -38,7 +38,9 @@ La pantalla viene dentro de la app: no se descarga de internet. Cómo funciona l
 
 ## Inventario
 
-La sección **Inventario** (arriba, junto a Pedidos) lleva la bodega grande (cajas por lote, cada una con su etiqueta CJ-000123) y la bodega pequeña (unidades sueltas), y las compara con SAP. Recibir, reponer, consultar, elegir el lote de lo que SAP descontó y ver lo que vence. Detalle en [docs/PANTALLA.md](docs/PANTALLA.md#inventario). Antes de usarlo, el supervisor marca los almacenes de SAP de esta bodega (**Panel → Almacenes**).
+La sección **Inventario** (arriba, junto a Pedidos) lleva la bodega grande (cajas por lote, cada una con su etiqueta CJ-000123) y la bodega pequeña (unidades sueltas, también por lote), y las compara con SAP. Recibir, reponer, consultar, contar la pequeña por lote, elegir el lote de lo que SAP descontó y ver lo que vence. Al finalizar un pedido, lo preparado sale de la pequeña: tiene que estar registrado ahí y, si hay varios lotes, se indica de cuál salió. Detalle en [docs/PANTALLA.md](docs/PANTALLA.md#inventario).
+
+Para comparar con SAP, el supervisor marca los almacenes de esta bodega (**Panel → Almacenes**) y el puente tiene que mandar almacenes y existencias (los últimos 30 minutos). Sin eso, el inventario de la bodega funciona igual pero sin **Por ubicar**, **Por descontar** ni **Sin contar**.
 
 ## Panel del supervisor
 

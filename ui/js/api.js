@@ -51,7 +51,8 @@ export function crearApi({ token, base = "", fetchImpl = (...args) => globalThis
     sesion: (id) => pedir("GET", `/picking/${id}`),
     escanear: (id, codigo, operacionId) => pedir("POST", `/picking/${id}/escanear`, { codigo, operacionId }),
     escaneos: (id, despuesDe = null) => pedir("GET", `/picking/${id}/escaneos?limit=100${despuesDe === null ? "" : `&despuesDe=${despuesDe}`}`),
-    finalizar: (id) => pedir("POST", `/picking/${id}/finalizar`),
+    // lotes: [{ itemCode, lotes: [{ pequenaLoteId, unidades }] }] para los productos con varios lotes en la pequeña.
+    finalizar: (id, lotes = []) => pedir("POST", `/picking/${id}/finalizar`, { lotes }),
     cerrarSesion: () => pedir("DELETE", "/ingreso/sesion"),
     // Panel del supervisor (solo con rol supervisor).
     resumenSupervisor: () => pedir("GET", "/supervisor/resumen"),
@@ -59,7 +60,8 @@ export function crearApi({ token, base = "", fetchImpl = (...args) => globalThis
       estado, limit: "50", ...(buscar ? { buscar } : {}), ...(cursor === null ? {} : { cursor: String(cursor) }) })}`),
     confirmarEtiqueta: (id, esUnidadIndividual) => pedir("PUT", `/supervisor/etiquetas/${id}/confirmacion`, { esUnidadIndividual }),
     quitarConfirmacion: (id) => pedir("DELETE", `/supervisor/etiquetas/${id}/confirmacion`),
-    confirmarManual: (cantidadEsperada) => pedir("POST", "/supervisor/etiquetas/confirmacion-manual", { cantidadEsperada }),
+    // Cantidad y versión del conjunto que revisó el supervisor (manualSinConfirmar y versionManual del resumen).
+    confirmarManual: (cantidadEsperada, versionEsperada) => pedir("POST", "/supervisor/etiquetas/confirmacion-manual", { cantidadEsperada, versionEsperada }),
     operadoresSupervisor: () => pedir("GET", "/supervisor/operadores"),
     crearOperador: (datos) => pedir("POST", "/supervisor/operadores", datos),
     cambiarPin: (id, pin) => pedir("PUT", `/supervisor/operadores/${id}/pin`, { pin }),
@@ -83,11 +85,12 @@ export function crearApi({ token, base = "", fetchImpl = (...args) => globalThis
     movimientos: ({ itemCode = null, antesDe = null } = {}) => pedir("GET", `/inventario/movimientos?${new URLSearchParams({
       limit: "30", ...(itemCode ? { itemCode } : {}), ...(antesDe === null ? {} : { antesDe: String(antesDe) }) })}`),
     descuentos: (antesDe = null) => pedir("GET", `/inventario/descuentos?limit=30${antesDe === null ? "" : `&antesDe=${antesDe}`}`),
-    recibir: (datos) => pedir("POST", "/inventario/recepciones", datos),
-    reponer: (caja, unidades) => pedir("POST", "/inventario/reposiciones", { caja, unidades }),
-    descontar: (itemCode, unidades, asignaciones) => pedir("POST", "/inventario/descuentos", { itemCode, unidades, asignaciones }),
-    cambiarLote: (id, asignaciones) => pedir("POST", `/inventario/descuentos/${id}/reasignacion`, { asignaciones }),
-    contarPequena: (itemCode, unidades) => pedir("PUT", `/inventario/productos/${encodeURIComponent(itemCode)}/pequena`, { unidades }),
-    corregirCaja: (id, unidades) => pedir("PUT", `/inventario/cajas/${id}/unidades`, { unidades }),
+    // Operaciones físicas: el cuerpo lleva su operacionId (ver operaciones.js). Reintentar lo mismo no lo cuenta dos veces.
+    recibir: (cuerpo) => pedir("POST", "/inventario/recepciones", cuerpo),
+    reponer: (cuerpo) => pedir("POST", "/inventario/reposiciones", cuerpo),
+    descontar: (cuerpo) => pedir("POST", "/inventario/descuentos", cuerpo),
+    cambiarLote: (id, cuerpo) => pedir("POST", `/inventario/descuentos/${id}/reasignacion`, cuerpo),
+    contarPequena: (itemCode, cuerpo) => pedir("PUT", `/inventario/productos/${encodeURIComponent(itemCode)}/pequena`, cuerpo),
+    corregirCaja: (id, cuerpo) => pedir("PUT", `/inventario/cajas/${id}/unidades`, cuerpo),
   };
 }

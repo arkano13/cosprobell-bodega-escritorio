@@ -749,6 +749,21 @@ h2 {
 .opcion-lote__campo { display: grid; gap: 4px; font-size: 14px; font-weight: 700; }
 .opcion-lote__campo .campo--numero { max-width: none; }
 
+/* ---------- Lotes de la pequeña: al finalizar un pedido y al contar ---------- */
+.despacho-producto { margin: 0 0 14px; padding: 8px 14px 12px; border: 1px solid var(--linea); border-radius: var(--radio-chico); }
+.despacho-producto legend { padding: 0 6px; font-weight: 700; }
+.despacho-lotes, .conteo-lotes { display: grid; gap: 8px; margin: 0 0 12px; padding: 0; list-style: none; }
+.despacho-lotes li, .conteo-lotes li {
+  display: grid; grid-template-columns: minmax(0, 1fr) 150px; gap: 6px 14px; align-items: center;
+  padding: 10px 12px; background: var(--superficie); border: 1.5px solid var(--linea); border-radius: var(--radio-chico);
+}
+.despacho-lotes li:focus-within, .conteo-lotes li:focus-within { border-color: var(--accion); box-shadow: 0 0 0 3px var(--lila); }
+.despacho-lotes li > label, .conteo-lotes li > label { display: grid; gap: 4px; }
+.despacho-lotes .campo--numero, .conteo-lotes .campo--numero { max-width: none; }
+.conteo-lotes li.conteo-lotes__nuevo { grid-template-columns: minmax(0, 1fr) 150px 150px; align-items: end; }
+.conteo-lotes__nuevo label > span { font-size: 14px; font-weight: 700; }
+.conteo__total { margin: 12px 0 0; font-size: 18px; font-weight: 700; font-variant-numeric: tabular-nums; }
+
 /* ---------- Registrar un código ---------- */
 .resultados-producto { display: grid; gap: 6px; max-height: 240px; margin: -6px 0 12px; padding: 0; overflow-y: auto; list-style: none; }
 .resultado-producto {
@@ -764,4 +779,7 @@ h2 {
   .caja-layout { grid-template-columns: minmax(0, 1fr); }
   .opcion-lote { grid-template-columns: minmax(0, 1fr) 100px; }
   .opcion-lote__campo { grid-column: 1 / -1; }
+}
+@media (max-width: 560px) {
+  .conteo-lotes li.conteo-lotes__nuevo { grid-template-columns: minmax(0, 1fr); }
 }
