@@ -92,6 +92,11 @@ export function crearApi({ token, base = "", fetchImpl = (...args) => globalThis
     almacenesSap: () => pedir("GET", "/inventario/almacenes"),
     productosDeAlmacen: (codigo, { buscar = "", pagina = 0 } = {}) => pedir("GET", `/inventario/almacenes/${encodeURIComponent(codigo)}/productos?${new URLSearchParams({
       pagina: String(pagina), limit: "50", ...(buscar ? { buscar } : {}) })}`),
+    // Conteo de una bodega (grande o pequena): lo que falta contar o lo contado, con el avance.
+    conteo: (bodega, { estado = "falta", buscar = "", pagina = 0 } = {}) => pedir("GET", `/inventario/conteo/${bodega}?${new URLSearchParams({
+      estado, pagina: String(pagina), limit: "50", ...(buscar ? { buscar } : {}) })}`),
+    // "No hay": se contó en esa bodega y no había ninguno. cuerpo: { operacionId, bodega }.
+    sinExistencia: (itemCode, cuerpo) => pedir("POST", `/inventario/productos/${encodeURIComponent(itemCode)}/sin-existencia`, cuerpo),
     caja: (codigo) => pedir("GET", `/inventario/cajas/${encodeURIComponent(codigo)}`),
     porVencer: (dias) => pedir("GET", `/inventario/por-vencer?dias=${dias}`),
     movimientos: ({ itemCode = null, antesDe = null } = {}) => pedir("GET", `/inventario/movimientos?${new URLSearchParams({

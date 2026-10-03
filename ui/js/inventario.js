@@ -2,15 +2,85 @@
 const numero = (valor) => Number(valor).toLocaleString("es-HN");
 const unidades = (n) => `${numero(n)} ${Math.abs(n) === 1 ? "unidad" : "unidades"}`;
 
-// Estado de un producto frente a SAP (lo calcula el servidor).
+// Estado de un producto frente a SAP (lo calcula el servidor), en palabras de la bodega.
 export const ESTADOS = {
   al_dia: { tipo: "ok", texto: "Cuadra con SAP" },
-  por_ubicar: { tipo: "alerta", texto: "Por ubicar" },
-  por_descontar: { tipo: "alerta", texto: "Por descontar" },
+  por_ubicar: { tipo: "alerta", texto: "Falta guardar" },
+  por_descontar: { tipo: "alerta", texto: "Falta marcar salida" },
   actualizando: { tipo: "gris", texto: "SAP actualizándose" },
-  conteo_inicial: { tipo: "gris", texto: "Sin contar" },
-  sin_comparacion_sap: { tipo: "gris", texto: "Sin comparación con SAP" },
+  conteo_inicial: { tipo: "gris", texto: "Falta contar" },
+  sin_comparacion_sap: { tipo: "gris", texto: "Sin datos de SAP" },
 };
+
+// Las bodegas con el nombre que conoce la gente: el almacén de SAP asignado ("01 · Almacén Principal"), o
+// "Bodega grande" / "Bodega pequeña" si todavía no se asignó. corto: "la 01" / "la grande".
+const POR_DEFECTO = { grande: { largo: "Bodega grande", corto: "la grande" }, pequena: { largo: "Bodega pequeña", corto: "la pequeña" } };
+export function nombreBodega(bodegas, bodega, { corto = false } = {}) {
+  const b = bodegas?.[bodega];
+  if (!b) return POR_DEFECTO[bodega][corto ? "corto" : "largo"];
+  return corto ? `la ${b.almacen}` : `${b.almacen} · ${b.nombre}`;
+}
+
+// "hace 5 min", "hace 2 h", "hace 3 d".
+export function haceTiempo(iso, ahora = Date.now()) {
+  const minutos = Math.round((ahora - Date.parse(iso)) / 60000);
+  if (!Number.isFinite(minutos)) return "fecha desconocida";
+  if (minutos < 1) return "hace menos de 1 minuto";
+  if (minutos < 60) return `hace ${minutos} min`;
+  const horas = Math.floor(minutos / 60);
+  return horas < 24 ? `hace ${horas} h` : `hace ${Math.floor(horas / 24)} d`;
+}
+
+// Indicador chico del estado de SAP: { tipo, texto, detalle }.
+export function estadoSap({ almacenes = [], comparacionDisponible = false, existenciasSapAl = null }, ahora = Date.now()) {
+  const llegada = existenciasSapAl ? `existencias ${haceTiempo(existenciasSapAl, ahora)}` : "todavía no llegaron existencias";
+  if (!almacenes.length) return { tipo: "alerta", texto: "SAP sin configurar", detalle: "Falta elegir los almacenes de esta bodega" };
+  if (comparacionDisponible) return { tipo: "ok", texto: "SAP al día", detalle: llegada };
+  return { tipo: "gris", texto: "Sin datos recientes de SAP", detalle: `${llegada}. Lo de la bodega funciona igual.` };
+}
+
+// Avance del conteo de una bodega: { texto, porcentaje, faltan, completo }.
+export function avanceConteo(avance) {
+  if (!avance) return null;
+  const { total, contados } = avance;
+  const porcentaje = total ? Math.round((contados / total) * 100) : 100;
+  return { texto: `${numero(contados)} de ${numero(total)} contados`, porcentaje, faltan: total - contados, completo: total > 0 && contados >= total };
+}
+
+// Pasos para poner en marcha el inventario (supervisor). datos: resumen del inventario + códigos sin confirmar.
+export function pasosPuestaEnMarcha({ almacenes = [], bodegas = {}, conteo = {} }, sinConfirmar = null) {
+  const contar = (bodega) => {
+    const a = avanceConteo(conteo?.[bodega]);
+    return { id: `contar-${bodega}`, texto: `Contar ${nombreBodega(bodegas, bodega, { corto: true })}`, hecho: Boolean(a?.completo),
+      detalle: a ? a.texto : "Primero elegí su almacén", bodega };
+  };
+  const pasos = [
+    { id: "almacenes", texto: "Marcar los almacenes de esta bodega", hecho: almacenes.length > 0,
+      detalle: almacenes.length ? almacenes.join(" y ") : "Panel del supervisor → Almacenes" },
+    { id: "bodegas", texto: "Elegir cuál almacén es cada bodega", hecho: Boolean(bodegas?.grande && bodegas?.pequena),
+      detalle: bodegas?.grande && bodegas?.pequena ? `${nombreBodega(bodegas, "grande")} y ${nombreBodega(bodegas, "pequena")}` : "Grande (cajas) y pequeña (despacho)" },
+    { id: "codigos", texto: "Confirmar los códigos de barras", hecho: sinConfirmar === 0,
+      detalle: sinConfirmar === null ? "" : sinConfirmar === 0 ? "Todos confirmados" : `${numero(sinConfirmar)} sin confirmar` },
+    contar("grande"), contar("pequena"),
+  ];
+  return { pasos, hechos: pasos.filter((p) => p.hecho).length, completo: pasos.every((p) => p.hecho) };
+}
+
+// Conteo de la 02: unidades sueltas por lote. filas: [{ lote, vencimiento, unidades }] (las vacías no cuentan).
+export function armarLotesPequena(filas) {
+  const lotes = [], vistos = new Set();
+  for (const [i, f] of filas.entries()) {
+    if (f.unidades === null && !f.lote) continue;
+    const cual = filas.length > 1 ? ` (fila ${i + 1})` : "";
+    if (!Number.isInteger(f.unidades) || f.unidades < 1) return { problema: `Escribí cuántas unidades hay${cual}.` };
+    const clave = JSON.stringify([f.lote || null, f.vencimiento ?? null]);
+    if (vistos.has(clave)) return { problema: `El lote ${f.lote || "sin lote"} está repetido.` };
+    vistos.add(clave);
+    lotes.push({ unidades: f.unidades, lote: f.lote || null, vencimiento: f.vencimiento ?? null });
+  }
+  if (!lotes.length) return { problema: "Escribí cuántas unidades hay, o tocá «No hay»." };
+  return { lotes, total: lotes.reduce((t, l) => t + l.unidades, 0) };
+}
 
 // Sin almacenes elegidos o sin existencias recientes de SAP, el inventario de la bodega funciona igual,
 // pero no se compara con SAP (la falta de datos no significa cero).
@@ -18,11 +88,11 @@ export const TEXTO_SIN_COMPARACION = "La comparación con SAP no está disponibl
   + "Recibir, reponer y contar funcionan igual.";
 
 export function textoEstado(estado) {
-  if (!estado || estado.estado === "sin_comparacion_sap") return "Sin comparación con SAP por ahora. El inventario de la bodega funciona igual.";
+  if (!estado || estado.estado === "sin_comparacion_sap") return "Sin datos recientes de SAP. Lo de la bodega funciona igual.";
   const d = estado.diferencia;
-  if (estado.estado === "por_ubicar") return `SAP tiene ${unidades(d)} que todavía no se ubicaron.`;
-  if (estado.estado === "por_descontar") return `SAP descontó ${unidades(-d)}: falta elegir de qué lote salieron.`;
-  if (estado.estado === "conteo_inicial") return `Todavía no se contó. SAP tiene ${unidades(d)}.`;
+  if (estado.estado === "por_ubicar") return `SAP registró ${unidades(d)} que todavía no se guardaron en la bodega.`;
+  if (estado.estado === "por_descontar") return `${-d === 1 ? "Salió" : "Salieron"} ${unidades(-d)} en SAP: falta marcar de qué lote.`;
+  if (estado.estado === "conteo_inicial") return `Falta contar. SAP tiene ${unidades(d)}.`;
   if (estado.estado === "actualizando") return "SAP cambió hace poco: se espera unos minutos a que llegue todo antes de avisar.";
   return estado.faltaEnSap > 0 ? `Cuadra. ${unidades(estado.faltaEnSap)} se recibieron antes que SAP las registre.` : "Cuadra con SAP.";
 }
@@ -51,19 +121,21 @@ export function diasParaVencer(iso, hoy = new Date()) {
 
 export const NOMBRES_MOVIMIENTO = {
   recepcion: "Entrada", reposicion: "Reposición", picking: "Salida por pedido", descuento: "Descuento de SAP",
-  reasignacion: "Cambio de lote", conteo: "Conteo de la pequeña", correccion: "Corrección de caja",
+  reasignacion: "Cambio de lote", conteo: "Conteo", correccion: "Corrección de caja",
 };
 export function textoMovimiento(m) {
   const nombre = NOMBRES_MOVIMIENTO[m.tipo] ?? m.tipo;
   return m.tipo === "picking" && m.docNum ? `${nombre} ${m.docNum}` : nombre;
 }
 // Cantidad que mostró el movimiento: la reposición pasa de una bodega a la otra (no cambia el total).
-export function cantidadMovimiento(m) {
-  if (m.tipo === "reposicion") return `${numero(m.pequena)} u. a la pequeña`;
+export function cantidadMovimiento(m, bodegas = null) {
+  if (m.tipo === "reposicion") return `${numero(m.pequena)} u. a ${nombreBodega(bodegas, "pequena", { corto: true })}`;
   // Cambiar el lote devuelve unidades a un lugar y las resta de otro: el total no cambia.
   if (m.tipo === "reasignacion") return "No cambia el total";
   if (m.tipo === "recepcion" && m.cajas > 0 && m.grande > 0) return `${numero(m.cajas)} ${m.cajas === 1 ? "caja" : "cajas"} · ${numero(m.grande)} u.`;
   const total = (m.grande ?? 0) + (m.pequena ?? 0);
+  // "No hay": se contó y no había ninguno.
+  if (m.tipo === "conteo" && total === 0 && /no hay/i.test(m.observacion ?? "")) return "No hay";
   // Un conteo que solo reparte la pequeña entre sus lotes deja el total igual.
   if (m.tipo === "conteo" && total === 0) return "No cambia el total";
   return `${total > 0 ? "+" : ""}${numero(total)} u.`;
@@ -77,6 +149,29 @@ export const NOMBRES_DOCUMENTO = {
   devolucionProveedor: "Devolución al proveedor", devolucionCliente: "Devolución de cliente",
 };
 export const textoDocumento = (d) => `${NOMBRES_DOCUMENTO[d.tipo] ?? d.tipo} ${d.docNum}`;
+
+// Conteo de la bodega de cajas. filas: [{ cajas (null si está vacío), unidadesPorCaja, lote, vencimiento }]; las filas
+// sin cajas, lote ni vencimiento no cuentan. Si solo hay unidades sueltas, van como un bulto con etiqueta. Devuelve
+// { cuerpo, total, cajas, etiquetas } (cuerpo para POST /inventario/recepciones, sin itemCode) o { problema }.
+export function armarConteoCajas(filas, bulto = null) {
+  const llenas = filas.filter((f) => f.cajas !== null || f.lote || f.vencimiento);
+  if (!llenas.length) {
+    if (!bulto) return { problema: "Escribí cuántas cajas hay, o tocá «No hay»." };
+    if (!Number.isInteger(bulto.unidades) || bulto.unidades < 1) return { problema: "Escribí cuántas unidades sueltas hay." };
+    return { cuerpo: { modo: "suelto", destino: "grande", unidades: bulto.unidades, lote: bulto.lote || null, vencimiento: bulto.vencimiento ?? null },
+      total: bulto.unidades, cajas: 0, etiquetas: 1 };
+  }
+  const g = armarGrupos(llenas, bulto);
+  if (g.problema) return g;
+  return { cuerpo: { modo: "grupos", grupos: g.grupos, bulto: g.bulto }, total: g.total, cajas: g.cajas, etiquetas: g.etiquetas };
+}
+
+// "77 en 5 cajas y un bulto", "14 unidades".
+export function textoContado({ total, cajas = 0, etiquetas = 0 }) {
+  const bulto = etiquetas > cajas;
+  if (!cajas) return bulto ? `${unidades(total)} sueltas en un bulto` : unidades(total);
+  return `${unidades(total)} en ${numero(cajas)} ${cajas === 1 ? "caja" : "cajas"}${bulto ? " y un bulto" : ""}`;
+}
 
 // Lo que entra en una recepción: total de unidades y frase para confirmar.
 // Cajas por grupos (cada grupo con su lote) y lo que sobra como un bulto en la grande. filas: [{ cajas,
@@ -99,21 +194,22 @@ export function armarGrupos(filas, bulto = null) {
     cajas, enCajas, total: enCajas + (bulto?.unidades ?? 0), etiquetas: cajas + (bulto ? 1 : 0) };
 }
 
-export function resumenRecepcion({ modo, cajas, unidadesPorCaja, unidades: sueltas, destino, lote, grupos, bulto }) {
+export function resumenRecepcion({ modo, cajas, unidadesPorCaja, unidades: sueltas, destino, lote, grupos, bulto }, bodegas = null) {
+  const a = (bodega) => `a ${nombreBodega(bodegas, bodega, { corto: true })}`;
   if (modo === "grupos") {
     const r = armarGrupos(grupos ?? [], bulto ?? null);
     if (r.problema) return { total: 0, texto: "" };
     const lotes = new Set(r.grupos.map((g) => g.lote ?? ""));
     const deLotes = lotes.size > 1 ? ` de ${numero(lotes.size)} lotes` : r.grupos[0].lote ? ` del lote ${r.grupos[0].lote}` : "";
     const extra = r.bulto ? ` Más un bulto suelto de ${unidades(r.bulto.unidades)}.` : "";
-    return { total: r.total, texto: `Entran ${numero(r.cajas)} ${r.cajas === 1 ? "caja" : "cajas"} · ${unidades(r.enCajas)}${deLotes} a la bodega grande.${extra}` };
+    return { total: r.total, texto: `Entran ${numero(r.cajas)} ${r.cajas === 1 ? "caja" : "cajas"} · ${unidades(r.enCajas)}${deLotes} ${a("grande")}.${extra}` };
   }
   const total = modo === "cajas" ? cajas * unidadesPorCaja : sueltas;
   if (!Number.isInteger(total) || total <= 0) return { total: 0, texto: "" };
   const deLote = lote ? ` del lote ${lote}` : "";
   const texto = modo === "cajas"
-    ? `Entran ${numero(cajas)} ${cajas === 1 ? "caja" : "cajas"} · ${unidades(total)}${deLote} a la bodega grande.`
-    : `Entran ${unidades(total)} sueltas${deLote} a la bodega ${destino === "pequena" ? "pequeña" : "grande"}.`;
+    ? `Entran ${numero(cajas)} ${cajas === 1 ? "caja" : "cajas"} · ${unidades(total)}${deLote} ${a("grande")}.`
+    : `Entran ${unidades(total)} sueltas${deLote} ${a(destino === "pequena" ? "pequena" : "grande")}.`;
   return { total, texto };
 }
 
@@ -160,7 +256,12 @@ export function opcionesDescuento(producto, devolver = [], hoy = new Date()) {
   return [...ordenar([...lotes.values()]), ...ordenar([...pequena.values()])];
 }
 
-export const nombreOpcion = (o) => (o.tipo === "pequena" ? `Pequeña · ${o.lote ? `lote ${o.lote}` : "sin lote"}` : `Lote ${o.lote ?? "sin lote"}`);
+// Con las bodegas asignadas: "02 · lote L1" y "01 · lote L1"; si no, "Pequeña · lote L1" y "Lote L1".
+export function nombreOpcion(o, bodegas = null) {
+  const lote = o.lote ? `lote ${o.lote}` : "sin lote";
+  if (o.tipo === "pequena") return `${bodegas?.pequena?.almacen ?? "Pequeña"} · ${lote}`;
+  return bodegas?.grande ? `${bodegas.grande.almacen} · ${lote}` : `Lote ${o.lote ?? "sin lote"}`;
+}
 
 // Primera propuesta: completar en el orden de la lista (lo que vence primero sale primero).
 export function sugerirAsignacion(opciones, total) {
@@ -176,12 +277,12 @@ export function sugerirAsignacion(opciones, total) {
 
 // Valida lo elegido y arma el cuerpo para el servidor. Devuelve { problema } o { asignaciones, texto }. Lo que sale
 // de la pequeña va en una sola asignación con el detalle de sus lotes.
-export function armarAsignaciones(opciones, asignado, total) {
+export function armarAsignaciones(opciones, asignado, total, bodegas = null) {
   const elegidas = opciones.filter((o) => (asignado[o.clave] ?? 0) > 0);
   for (const o of elegidas) {
     const n = asignado[o.clave];
     if (!Number.isInteger(n)) return { problema: "Las cantidades tienen que ser números enteros." };
-    if (n > o.unidades) return { problema: `${nombreOpcion(o)} tiene ${unidades(o.unidades)}.` };
+    if (n > o.unidades) return { problema: `${nombreOpcion(o, bodegas)} tiene ${unidades(o.unidades)}.` };
   }
   const suma = elegidas.reduce((t, o) => t + asignado[o.clave], 0);
   if (suma !== total) return { problema: `Asignaste ${numero(suma)} de ${numero(total)}: tienen que ser exactamente ${numero(total)}.`, suma };
@@ -191,14 +292,15 @@ export function armarAsignaciones(opciones, asignado, total) {
     asignaciones.push({ tipo: "pequena", unidades: dePequena.reduce((t, o) => t + asignado[o.clave], 0),
       lotes: dePequena.map((o) => ({ pequenaLoteId: o.pequenaLoteId, unidades: asignado[o.clave] })) });
   }
-  return { suma, asignaciones, texto: elegidas.map((o) => `${nombreOpcion(o)}: ${numero(asignado[o.clave])}`).join(" · ") };
+  return { suma, asignaciones, texto: elegidas.map((o) => `${nombreOpcion(o, bodegas)}: ${numero(asignado[o.clave])}`).join(" · ") };
 }
 
 // Texto de la asignación de un descuento ya hecho (como la devuelve el servidor).
-export function textoAsignacion(asignacion) {
+export function textoAsignacion(asignacion, bodegas = null) {
+  const pequena = bodegas?.pequena?.almacen ?? "pequeña";
   return asignacion.flatMap((a) => (a.tipo === "pequena" && a.lotesPequena?.length
-    ? a.lotesPequena.map((l) => `pequeña ${l.lote ?? "sin lote"}: ${numero(l.unidades)}`)
-    : [`${a.tipo === "pequena" ? "pequeña" : a.lote ?? "sin lote"}: ${numero(a.unidades)}`])).join(" · ");
+    ? a.lotesPequena.map((l) => `${pequena} ${l.lote ?? "sin lote"}: ${numero(l.unidades)}`)
+    : [`${a.tipo === "pequena" ? pequena : a.lote ?? "sin lote"}: ${numero(a.unidades)}`])).join(" · ");
 }
 
 // Conteo de la pequeña por lote. filas: [{ lote, vencimiento ("AAAA-MM-DD" o null), unidades }]. Devuelve el cuerpo
@@ -256,15 +358,24 @@ export function armarLotesDespacho(elegir, asignado) {
 }
 
 // Lista de productos: los filtros que tienen sentido según haya almacenes de SAP marcados y comparación disponible.
+// Los filtros están siempre (la pantalla no cambia sola); los que no aplican quedan deshabilitados con su motivo.
 export function filtrosExistencias({ conteos = {}, almacenes = [], comparacionDisponible = false }) {
-  return [["todos", "Todos"], almacenes.length > 0 && ["solo_sap", "Solo en SAP"], comparacionDisponible && ["diferencia", "Con diferencia"]]
-    .filter(Boolean).map(([id, texto]) => ({ id, texto, n: conteos[id] ?? 0 }));
+  const sinSap = !almacenes.length ? "Falta elegir los almacenes de esta bodega" : null;
+  return [
+    { id: "todos", texto: "Todo", n: conteos.todos ?? 0 },
+    { id: "solo_sap", texto: "Falta contar", n: conteos.solo_sap ?? 0, motivo: sinSap },
+    { id: "diferencia", texto: "Diferencias", n: conteos.diferencia ?? 0, motivo: sinSap ?? (comparacionDisponible ? null : "Sin datos recientes de SAP") },
+    { id: "por_vencer", texto: "Por vencer", n: conteos.por_vencer ?? 0 },
+  ];
 }
 
-// Vista de una bodega: "Sin registrar" solo si la bodega tiene su almacén de SAP asignado.
+// Vista de una bodega: "Falta contar" necesita el almacén de SAP asignado a la bodega.
 export function filtrosBodega({ conteos = {}, almacen = null }) {
-  return [["todos", "Todos"], ["registrados", "Registrados"], almacen && ["sin_registrar", "Sin registrar"]]
-    .filter(Boolean).map(([id, texto]) => ({ id, texto, n: conteos[id] ?? 0 }));
+  return [
+    { id: "todos", texto: "Todo", n: conteos.todos ?? 0 },
+    { id: "sin_registrar", texto: "Falta contar", n: conteos.sin_registrar ?? 0, motivo: almacen ? null : "Falta elegir el almacén de esta bodega" },
+    { id: "por_vencer", texto: "Por vencer", n: conteos.por_vencer ?? 0 },
+  ];
 }
 
 // Un lote dentro de una bodega: "L2408-090 · vence 09/2026 · 3 cajas · 60 unidades".

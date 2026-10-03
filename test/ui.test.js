@@ -188,7 +188,11 @@ import { PATRONES, simbolos, anchos, barras, MARGEN } from "../ui/js/code128.js"
 import { ESTADOS, armarAsignaciones, armarConteo, armarGrupos, armarLotesDespacho, cantidadMovimiento, diasParaVencer, esCodigoCaja, estadoFila,
   filtrosBodega, filtrosExistencias, finDeMes, nombreOpcion, textoLoteBodega,
   opcionesDescuento, quien, resumenRecepcion, revisarDespacho, sugerirAsignacion, textoAsignacion, textoDocumento, textoEstado, textoMovimiento,
-  textoPorVencer, textoVencimiento, unidadesPorProducto } from "../ui/js/inventario.js";
+  textoPorVencer, textoVencimiento, unidadesPorProducto, nombreBodega, haceTiempo, estadoSap, avanceConteo, pasosPuestaEnMarcha, armarLotesPequena,
+  armarConteoCajas, textoContado } from "../ui/js/inventario.js";
+
+// Bodegas con su almacén asignado, como las devuelve el servidor.
+const BODEGAS = { grande: { almacen: "01", nombre: "Almacén Principal" }, pequena: { almacen: "02", nombre: "Despacho" } };
 import { crearOperacion } from "../ui/js/operaciones.js";
 
 test("code128: cada símbolo mide 11 módulos (el fin 13), sin repetidos, y el dígito de control es el del estándar", () => {
@@ -219,17 +223,22 @@ test("inventario: vencimiento por mes y año, días para vencer y código de caj
 
 test("inventario: textos del estado frente a SAP, movimientos y documentos", () => {
   assert.equal(ESTADOS.por_descontar.tipo, "alerta");
-  assert.equal(textoEstado({ estado: "por_ubicar", diferencia: 100, faltaEnSap: 0 }), "SAP tiene 100 unidades que todavía no se ubicaron.");
-  assert.equal(textoEstado({ estado: "por_descontar", diferencia: -1, faltaEnSap: 0 }), "SAP descontó 1 unidad: falta elegir de qué lote salieron.");
+  assert.equal(textoEstado({ estado: "por_ubicar", diferencia: 100, faltaEnSap: 0 }), "SAP registró 100 unidades que todavía no se guardaron en la bodega.");
+  assert.equal(textoEstado({ estado: "por_descontar", diferencia: -1, faltaEnSap: 0 }), "Salió 1 unidad en SAP: falta marcar de qué lote.");
+  assert.equal(textoEstado({ estado: "conteo_inicial", diferencia: 48, faltaEnSap: 0 }), "Falta contar. SAP tiene 48 unidades.");
   assert.equal(textoEstado({ estado: "al_dia", diferencia: 0, faltaEnSap: 20 }), "Cuadra. 20 unidades se recibieron antes que SAP las registre.");
   // Sin comparación con SAP (sin almacenes o sin existencias recientes) no hay estado, y no significa cero.
-  assert.match(textoEstado(null), /Sin comparación con SAP/);
+  assert.match(textoEstado(null), /Sin datos recientes de SAP/);
   assert.match(textoEstado({ estado: "sin_comparacion_sap", diferencia: null }), /funciona igual/);
   assert.equal(ESTADOS.sin_comparacion_sap.tipo, "gris");
   assert.equal(cantidadMovimiento({ tipo: "conteo", grande: 0, pequena: 0, cajas: 0 }), "No cambia el total");
   assert.equal(cantidadMovimiento({ tipo: "conteo", grande: 0, pequena: -3, cajas: 0 }), "-3 u.");
+  // "No hay": se contó en una bodega y no había ninguno.
+  assert.equal(cantidadMovimiento({ tipo: "conteo", grande: 0, pequena: 0, cajas: 0, observacion: "Contado: no hay" }), "No hay");
+  assert.equal(textoMovimiento({ tipo: "conteo" }), "Conteo");
   assert.equal(textoMovimiento({ tipo: "picking", docNum: 91004 }), "Salida por pedido 91004");
   assert.equal(cantidadMovimiento({ tipo: "reposicion", grande: -24, pequena: 24 }), "24 u. a la pequeña");
+  assert.equal(cantidadMovimiento({ tipo: "reposicion", grande: -24, pequena: 24 }, BODEGAS), "24 u. a la 02");
   assert.equal(cantidadMovimiento({ tipo: "recepcion", grande: 1000, pequena: 0, cajas: 50 }), "50 cajas · 1,000 u.");
   assert.equal(cantidadMovimiento({ tipo: "picking", grande: 0, pequena: -6, cajas: 0 }), "-6 u.");
   assert.equal(cantidadMovimiento({ tipo: "reasignacion", grande: 20, pequena: -20, cajas: 1 }), "No cambia el total");
@@ -242,8 +251,9 @@ test("inventario: textos del estado frente a SAP, movimientos y documentos", () 
 
 test("inventario: resumen de una recepción en cajas o suelta", () => {
   assert.deepEqual(resumenRecepcion({ modo: "cajas", cajas: 5, unidadesPorCaja: 20, lote: "L2410-033" }),
-    { total: 100, texto: "Entran 5 cajas · 100 unidades del lote L2410-033 a la bodega grande." });
-  assert.equal(resumenRecepcion({ modo: "suelto", unidades: 1, destino: "pequena" }).texto, "Entran 1 unidad sueltas a la bodega pequeña.");
+    { total: 100, texto: "Entran 5 cajas · 100 unidades del lote L2410-033 a la grande." });
+  assert.equal(resumenRecepcion({ modo: "suelto", unidades: 1, destino: "pequena" }).texto, "Entran 1 unidad sueltas a la pequeña.");
+  assert.equal(resumenRecepcion({ modo: "suelto", unidades: 3, destino: "grande" }, BODEGAS).texto, "Entran 3 unidades sueltas a la 01.");
   assert.equal(resumenRecepcion({ modo: "cajas", cajas: 0, unidadesPorCaja: 20 }).total, 0);
 });
 
@@ -352,14 +362,18 @@ test("api: cuerpos de finalizar, confirmación masiva y operaciones del inventar
 });
 
 test("inventario: lista de productos, filtros según SAP y estado de cada fila", async () => {
-  const conteos = { todos: 4, grande: 2, pequena: 3, solo_sap: 1, diferencia: 2 };
-  assert.deepEqual(filtrosExistencias({ conteos, almacenes: [], comparacionDisponible: false }).map((f) => f.id), ["todos"]);
-  assert.deepEqual(filtrosExistencias({ conteos, almacenes: ["01", "02"], comparacionDisponible: false }).map((f) => [f.id, f.n]),
-    [["todos", 4], ["solo_sap", 1]]);
-  assert.deepEqual(filtrosExistencias({ conteos, almacenes: ["01"], comparacionDisponible: true }).at(-1), { id: "diferencia", texto: "Con diferencia", n: 2 });
-  assert.deepEqual(estadoFila({ estado: "por_ubicar", diferencia: 1200 }), { tipo: "alerta", texto: "Por ubicar: 1,200" });
-  assert.deepEqual(estadoFila({ estado: "por_descontar", diferencia: -3 }), { tipo: "alerta", texto: "Por descontar: 3" });
-  assert.deepEqual(estadoFila({ estado: "conteo_inicial", diferencia: 48 }), { tipo: "gris", texto: "Sin contar" });
+  const conteos = { todos: 4, grande: 2, pequena: 3, solo_sap: 1, diferencia: 2, por_vencer: 1 };
+  // Los cuatro filtros están siempre; los que no aplican traen el motivo (quedan deshabilitados).
+  const motivos = (lista) => lista.map((f) => [f.id, f.texto, f.n, f.motivo ?? null]);
+  assert.deepEqual(motivos(filtrosExistencias({ conteos, almacenes: [], comparacionDisponible: false })), [
+    ["todos", "Todo", 4, null], ["solo_sap", "Falta contar", 1, "Falta elegir los almacenes de esta bodega"],
+    ["diferencia", "Diferencias", 2, "Falta elegir los almacenes de esta bodega"], ["por_vencer", "Por vencer", 1, null]]);
+  assert.deepEqual(motivos(filtrosExistencias({ conteos, almacenes: ["01", "02"], comparacionDisponible: false })).map((f) => f[3]),
+    [null, null, "Sin datos recientes de SAP", null]);
+  assert.deepEqual(motivos(filtrosExistencias({ conteos, almacenes: ["01"], comparacionDisponible: true })).map((f) => f[3]), [null, null, null, null]);
+  assert.deepEqual(estadoFila({ estado: "por_ubicar", diferencia: 1200 }), { tipo: "alerta", texto: "Falta guardar: 1,200" });
+  assert.deepEqual(estadoFila({ estado: "por_descontar", diferencia: -3 }), { tipo: "alerta", texto: "Falta marcar salida: 3" });
+  assert.deepEqual(estadoFila({ estado: "conteo_inicial", diferencia: 48 }), { tipo: "gris", texto: "Falta contar" });
   assert.deepEqual(estadoFila({ estado: "al_dia", diferencia: 0 }), { tipo: "ok", texto: "Cuadra con SAP" });
   assert.equal(estadoFila({ estado: null, diferencia: null }), null);
   const pedidos = [];
@@ -383,15 +397,17 @@ test("inventario: recibir o contar cajas por lote, con el bulto de lo que sobra"
   assert.match(armarGrupos([{ cajas: 200, unidadesPorCaja: 1 }, { cajas: 200, unidadesPorCaja: 1 }, { cajas: 101, unidadesPorCaja: 1 }]).problema, /500 cajas/);
   // El resumen de una sola fila sin bulto queda como antes; con varios lotes, los cuenta.
   assert.deepEqual(resumenRecepcion({ modo: "grupos", grupos: [{ cajas: 4, unidadesPorCaja: 20, lote: "L2408-090" }] }),
-    { total: 80, texto: "Entran 4 cajas · 80 unidades del lote L2408-090 a la bodega grande." });
-  assert.deepEqual(resumenRecepcion({ modo: "grupos", grupos: filas, bulto: { unidades: 7 } }),
-    { total: 115, texto: "Entran 5 cajas · 108 unidades de 2 lotes a la bodega grande. Más un bulto suelto de 7 unidades." });
+    { total: 80, texto: "Entran 4 cajas · 80 unidades del lote L2408-090 a la grande." });
+  assert.deepEqual(resumenRecepcion({ modo: "grupos", grupos: filas, bulto: { unidades: 7 } }, BODEGAS),
+    { total: 115, texto: "Entran 5 cajas · 108 unidades de 2 lotes a la 01. Más un bulto suelto de 7 unidades." });
   assert.equal(resumenRecepcion({ modo: "grupos", grupos: [{ cajas: 0, unidadesPorCaja: 5 }] }).total, 0);
 });
 
 test("inventario: vista de cada bodega, filtros y texto de cada lote", async () => {
-  assert.deepEqual(filtrosBodega({ conteos: { todos: 5, registrados: 1, sin_registrar: 4 }, almacen: null }).map((f) => f.id), ["todos", "registrados"]);
-  assert.deepEqual(filtrosBodega({ conteos: { todos: 5, registrados: 1, sin_registrar: 4 }, almacen: "01" }).at(-1), { id: "sin_registrar", texto: "Sin registrar", n: 4 });
+  const conteos = { todos: 5, registrados: 1, sin_registrar: 4, por_vencer: 2 };
+  assert.deepEqual(filtrosBodega({ conteos, almacen: null }).map((f) => [f.id, f.texto, f.n, f.motivo ?? null]), [
+    ["todos", "Todo", 5, null], ["sin_registrar", "Falta contar", 4, "Falta elegir el almacén de esta bodega"], ["por_vencer", "Por vencer", 2, null]]);
+  assert.equal(filtrosBodega({ conteos, almacen: "01" })[1].motivo, null);
   assert.equal(textoLoteBodega({ lote: "L2408-090", vencimiento: "2026-09-30", unidades: 60, cajas: 3 }, { conCajas: true }), "L2408-090 · vence 09/2026 · 3 cajas · 60 unidades");
   assert.equal(textoLoteBodega({ lote: null, vencimiento: null, unidades: 1, cajas: 0 }), "Sin lote · 1 unidad");
   const pedidos = [];
@@ -416,4 +432,77 @@ test("api: almacenes de SAP y los productos de uno", async () => {
   await api.productosDeAlmacen("V 05", { buscar: "crema", pagina: 2 });
   assert.deepEqual(pedidos, ["/inventario/almacenes", "/inventario/almacenes/01/productos?pagina=0&limit=50",
     "/inventario/almacenes/V%2005/productos?pagina=2&limit=50&buscar=crema"]);
+});
+
+test("inventario: nombre de cada bodega, estado de SAP y avance del conteo", () => {
+  assert.equal(nombreBodega(BODEGAS, "grande"), "01 · Almacén Principal");
+  assert.equal(nombreBodega(BODEGAS, "pequena", { corto: true }), "la 02");
+  assert.equal(nombreBodega({ grande: null, pequena: null }, "grande"), "Bodega grande");
+  assert.equal(nombreBodega(undefined, "pequena", { corto: true }), "la pequeña");
+  const ahora = Date.parse("2026-10-03T15:00:00Z");
+  assert.equal(haceTiempo("2026-10-03T14:55:00Z", ahora), "hace 5 min");
+  assert.equal(haceTiempo("2026-10-03T12:00:00Z", ahora), "hace 3 h");
+  assert.deepEqual(estadoSap({ almacenes: [], comparacionDisponible: false }, ahora),
+    { tipo: "alerta", texto: "SAP sin configurar", detalle: "Falta elegir los almacenes de esta bodega" });
+  assert.deepEqual(estadoSap({ almacenes: ["01"], comparacionDisponible: true, existenciasSapAl: "2026-10-03T14:55:00Z" }, ahora),
+    { tipo: "ok", texto: "SAP al día", detalle: "existencias hace 5 min" });
+  assert.equal(estadoSap({ almacenes: ["01"], comparacionDisponible: false, existenciasSapAl: null }, ahora).tipo, "gris");
+  assert.deepEqual(avanceConteo({ total: 544, contados: 123 }), { texto: "123 de 544 contados", porcentaje: 23, faltan: 421, completo: false });
+  assert.equal(avanceConteo({ total: 2, contados: 2 }).completo, true);
+  assert.equal(avanceConteo({ total: 0, contados: 0 }).completo, false);
+  assert.equal(avanceConteo(null), null);
+});
+
+test("inventario: puesta en marcha del supervisor", () => {
+  const vacio = pasosPuestaEnMarcha({ almacenes: [], bodegas: { grande: null, pequena: null }, conteo: { grande: null, pequena: null } }, 12);
+  assert.deepEqual(vacio.pasos.map((p) => [p.id, p.hecho]), [["almacenes", false], ["bodegas", false], ["codigos", false], ["contar-grande", false], ["contar-pequena", false]]);
+  assert.equal(vacio.pasos[2].detalle, "12 sin confirmar");
+  assert.equal(vacio.pasos[3].texto, "Contar la grande");
+  const listo = pasosPuestaEnMarcha({ almacenes: ["01", "02"], bodegas: BODEGAS,
+    conteo: { grande: { total: 5, contados: 5 }, pequena: { total: 3, contados: 1 } } }, 0);
+  assert.deepEqual([listo.hechos, listo.completo], [4, false]);
+  assert.deepEqual([listo.pasos[3].texto, listo.pasos[4].detalle], ["Contar la 01", "1 de 3 contados"]);
+  assert.equal(pasosPuestaEnMarcha({ almacenes: ["01"], bodegas: BODEGAS, conteo: { grande: { total: 1, contados: 1 }, pequena: { total: 1, contados: 1 } } }, 0).completo, true);
+});
+
+test("inventario: conteo de la 01 en cajas y de la 02 por lote", () => {
+  // 01: las filas vacías no cuentan; si solo hay suelto, va como un bulto.
+  const vacia = { cajas: null, unidadesPorCaja: 20, lote: null, vencimiento: null };
+  assert.deepEqual(armarConteoCajas([{ cajas: 4, unidadesPorCaja: 20, lote: "L1", vencimiento: null }, vacia], null),
+    { cuerpo: { modo: "grupos", grupos: [{ cajas: 4, unidadesPorCaja: 20, lote: "L1", vencimiento: null }], bulto: null }, total: 80, cajas: 4, etiquetas: 4 });
+  assert.deepEqual(armarConteoCajas([vacia], { unidades: 6, lote: "L2", vencimiento: "2027-03-31" }),
+    { cuerpo: { modo: "suelto", destino: "grande", unidades: 6, lote: "L2", vencimiento: "2027-03-31" }, total: 6, cajas: 0, etiquetas: 1 });
+  assert.match(armarConteoCajas([vacia], null).problema, /«No hay»/);
+  assert.match(armarConteoCajas([{ ...vacia, lote: "L3" }], null).problema, /cantidad de cajas/);
+  assert.equal(textoContado({ total: 77, cajas: 5, etiquetas: 6 }), "77 unidades en 5 cajas y un bulto");
+  assert.equal(textoContado({ total: 6, cajas: 0, etiquetas: 1 }), "6 unidades sueltas en un bulto");
+  assert.equal(textoContado({ total: 14 }), "14 unidades");
+  // 02: unidades por lote; las filas vacías no cuentan y un lote no se repite.
+  assert.deepEqual(armarLotesPequena([{ unidades: 10, lote: "L1", vencimiento: null }, { unidades: null, lote: null, vencimiento: null }, { unidades: 4, lote: null, vencimiento: null }]),
+    { lotes: [{ unidades: 10, lote: "L1", vencimiento: null }, { unidades: 4, lote: null, vencimiento: null }], total: 14 });
+  assert.match(armarLotesPequena([{ unidades: null, lote: null }]).problema, /«No hay»/);
+  assert.match(armarLotesPequena([{ unidades: 1, lote: "L1" }, { unidades: 2, lote: "L1" }]).problema, /repetido/);
+  assert.match(armarLotesPequena([{ unidades: null, lote: "L1" }, { unidades: 1, lote: null }]).problema, /\(fila 1\)/);
+});
+
+test("inventario: salidas con el nombre de cada bodega", () => {
+  assert.equal(nombreOpcion({ tipo: "pequena", lote: "L1" }, BODEGAS), "02 · lote L1");
+  assert.equal(nombreOpcion({ tipo: "lote", lote: null }, BODEGAS), "01 · sin lote");
+  assert.equal(nombreOpcion({ tipo: "lote", lote: "L1" }), "Lote L1");
+  assert.equal(textoAsignacion([{ tipo: "lote", lote: "L1", unidades: 10 }, { tipo: "pequena", unidades: 5 }], BODEGAS), "L1: 10 · 02: 5");
+});
+
+test("api: conteo de una bodega, «no hay» y recepción por lotes", async () => {
+  const pedidos = [];
+  const api = crearApi({ token: "t", fetchImpl: async (url, opciones) => { pedidos.push([opciones.method, url, opciones.body && JSON.parse(opciones.body)]); return Response.json({ data: {} }); } });
+  await api.conteo("grande");
+  await api.conteo("pequena", { estado: "contados", buscar: "sérum", pagina: 2 });
+  await api.sinExistencia("SH 01", { operacionId: "op-1", bodega: "pequena" });
+  await api.recibir({ operacionId: "op-2", itemCode: "SH01", modo: "lotes", lotes: [{ unidades: 4, lote: "L1", vencimiento: null }], adelantar: false });
+  assert.deepEqual(pedidos, [
+    ["GET", "/inventario/conteo/grande?estado=falta&pagina=0&limit=50", undefined],
+    ["GET", "/inventario/conteo/pequena?estado=contados&pagina=2&limit=50&buscar=s%C3%A9rum", undefined],
+    ["POST", "/inventario/productos/SH%2001/sin-existencia", { operacionId: "op-1", bodega: "pequena" }],
+    ["POST", "/inventario/recepciones", { operacionId: "op-2", itemCode: "SH01", modo: "lotes", lotes: [{ unidades: 4, lote: "L1", vencimiento: null }], adelantar: false }],
+  ]);
 });
