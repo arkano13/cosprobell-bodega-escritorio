@@ -38,9 +38,9 @@ La pantalla viene dentro de la app: no se descarga de internet. Cómo funciona l
 
 ## Inventario
 
-La sección **Inventario** (arriba, junto a Pedidos) lleva la bodega grande (cajas por lote, cada una con su etiqueta CJ-000123) y la bodega pequeña (unidades sueltas, también por lote), y las compara con SAP. Recibir o contar cajas por lote (con un bulto para lo que sobra), reponer, ver la lista de todos los productos y lo que hay en cada bodega, contar la pequeña por lote, elegir el lote de lo que SAP descontó y ver lo que vence. Al finalizar un pedido, lo preparado sale de la pequeña: tiene que estar registrado ahí y, si hay varios lotes, se indica de cuál salió. Detalle en [docs/PANTALLA.md](docs/PANTALLA.md#inventario).
+La sección **Inventario** (arriba, junto a Pedidos) lleva la bodega de cajas completas (cajas por lote, cada una con su etiqueta CJ-000123) y la de despacho (unidades sueltas, también por lote), con el nombre de su almacén de SAP ("01 · Principal", "02 · Despacho"), y las compara con SAP. El inicio muestra el indicador de SAP, lo de **Hoy** (falta contar, falta guardar, falta marcar salida, por vencer) y, para el supervisor, la **puesta en marcha**. **Contar** recorre una bodega producto por producto con su avance ("123 de 544"): en la 01 por cajas y lote, en la 02 por unidades y lote, con **No hay** y paso automático al siguiente. También: recibir, pasar de la 01 a la 02, una sola lista de productos (las dos bodegas o cada una), la ficha de cada producto con las dos bodegas frente a SAP, marcar de qué lote salió lo que SAP descontó y ver lo que vence. Al finalizar un pedido, lo preparado sale de la 02: tiene que estar registrado ahí y, si hay varios lotes, se indica de cuál salió. Detalle en [docs/PANTALLA.md](docs/PANTALLA.md#inventario).
 
-Para comparar con SAP, el supervisor marca los almacenes de esta bodega y elige cuál es la bodega grande y cuál la pequeña (**Panel → Almacenes**) y el puente tiene que mandar almacenes y existencias (los últimos 30 minutos). Sin eso, el inventario de la bodega funciona igual pero sin **Por ubicar**, **Por descontar** ni **Sin contar**.
+Para comparar con SAP, el supervisor marca los almacenes de esta bodega y elige cuál es la de cajas y cuál la de despacho (**Panel → Almacenes**), y el puente tiene que mandar almacenes y existencias (los últimos 30 minutos). Sin eso, el inventario de la bodega funciona igual pero **Falta guardar** y **Falta marcar salida** quedan en "—".
 
 ## Panel del supervisor
 
@@ -52,7 +52,7 @@ Solo aparece (en el **Menú** y como sección, junto a Pedidos e Inventario) par
 | Operadores | Agregar personas, cambiar PIN (avisa si es fácil de adivinar), desbloquear, desactivar y activar. Cambiar el PIN o desactivar cierra las sesiones de esa persona. Nadie puede desactivarse a sí mismo. |
 | Revisiones | Preparaciones en revisión porque SAP cambió el pedido (qué producto cambió, antes y ahora): **Reiniciar con los datos nuevos** la anula y el pedido se vuelve a preparar; las lecturas quedan en el historial. También pedidos finalizados con diferencias (últimas 24 h) y preparados sin entrega en SAP hace más de 24 h. |
 | Sincronización | Cuándo llegaron por última vez pedidos, clientes, productos, unidades, códigos de barras, almacenes, existencias y documentos de stock desde el puente de SAP, con aviso si los pedidos o las existencias pasan más de 1 hora sin datos o el resto más de 24 horas. |
-| Almacenes | Marcar qué almacenes de SAP son de esta bodega: el inventario compara solo contra ellos. Opción para mostrar en Pedidos solo los de esos almacenes. |
+| Almacenes | Marcar qué almacenes de SAP son de esta bodega (el inventario compara solo contra ellos), elegir cuál es la bodega de cajas y cuál la de despacho, y ver lo que SAP tiene en cada almacén. Opción para mostrar en Pedidos solo los de esos almacenes. |
 
 En **Etiquetas** también se puede **Registrar un código** que SAP no tiene: se escanea el envase y se elige el producto.
 
