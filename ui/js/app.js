@@ -5,7 +5,7 @@ import { HORAS_EN_LISTA, sigueEnLista, textosPreparado } from "./preparados.js";
 import { NOMBRES_DATOS, estadoDatos, estadoOperador, puedeSerUnidad, quienConfirmo, textoCambio, textoRevision, textoSinEntrega, textoUnidad } from "./supervisor.js";
 import { ESTADOS, TEXTO_SIN_COMPARACION, armarAsignaciones, armarConteo, armarConteoCajas, armarGrupos, armarLotesDespacho, armarLotesPequena, avanceConteo,
   cantidadMovimiento, diasParaVencer, esCodigoCaja, estadoFila, estadoSap, filtrosBodega, filtrosExistencias, finDeMes, nombreBodega, nombreOpcion, opcionesDescuento,
-  pasosPuestaEnMarcha, quien, resumenRecepcion, revisarDespacho, sugerirAsignacion, textoAsignacion, textoContado, textoDocumento, textoEstado, textoLoteBodega,
+  pasosPuestaEnMarcha, quien, resumenPase, resumenRecepcion, revisarDespacho, sugerirAsignacion, sugerirCajas, textoAsignacion, textoContado, textoDocumento, textoEstado, textoLoteBodega,
   textoMovimiento, textoPorVencer, textoVencimiento, unidadesPorProducto } from "./inventario.js";
 import { crearOperacion } from "./operaciones.js";
 import { barras } from "./code128.js";
@@ -1367,7 +1367,7 @@ async function vistaInventario() {
   const p = r.pendientes;
   // Sin comparación con SAP no hay pendientes que calcular: el inventario de la bodega funciona igual.
   const comparar = r.comparacionDisponible === true;
-  estado.pendientesInventario = comparar ? p.porUbicar + p.porDescontar : 0;
+  estado.pendientesInventario = comparar ? p.porUbicar + p.porDescontar + (p.porPasar ?? 0) : 0;
   const lector = campoLector({ placeholder: "Escaneá la etiqueta de una caja o el código de un producto", alLeer: (t) => leerEnInventario(t) });
   // Una tarea de hoy: n null muestra "—" (sin datos para calcularla).
   const tarea = (nombreIcono, titulo, n, texto, onclick, tipo = "alerta") => h("button", {
@@ -1401,6 +1401,9 @@ async function vistaInventario() {
         () => vistaConteo(), "gris"),
       tarea("caja", "Falta guardar", comparar ? p.porUbicar : null,
         conDatos(`llegó en SAP y falta guardarlo en la bodega${p.actualizando > 0 ? ` · ${numero(p.actualizando)} actualizándose` : ""}`), () => vistaPendientes("ubicar")),
+      tarea("mover", `Falta pasar a ${bodegaNombre("pequena", { corto: true })}`, comparar && r.bodegas?.grande && r.bodegas?.pequena ? p.porPasar ?? 0 : null,
+        !comparar ? conDatos("") : r.bodegas?.grande && r.bodegas?.pequena ? "SAP ya lo pasó: falta marcar qué cajas" : "Falta elegir el almacén de cada bodega",
+        () => vistaPendientes("pasar")),
       tarea("restar", "Falta marcar salida", comparar ? p.porDescontar : null, conDatos("salió en SAP y falta marcar de qué lote"), () => vistaPendientes("descontar")),
       tarea("calendario", "Por vencer", vencen, textoPorVencer(r.porVencer), () => vistaPorVencer(), r.porVencer.vencidos ? "error" : "alerta")),
     h("div", { class: "acciones-inventario" },
@@ -1508,7 +1511,8 @@ async function vistaProducto(itemCode, mensaje = null) {
     e?.estado === "por_descontar" && boton("boton--principal", "restar", "Marcar salida", { onclick: () => vistaDescontar(itemCode) }),
     contar("grande"), contar("pequena"),
     e?.estado !== "por_ubicar" && boton("", "caja", "Recibir", { onclick: () => vistaRecibir(itemCode) }),
-    cajaParaPasar && boton("", "mover", `Pasar a ${bodegaNombre("pequena", { corto: true })}`, { onclick: () => vistaCaja(cajaParaPasar.codigo) }),
+    p.porPasar > 0 ? boton("boton--principal", "mover", `Pasar a ${bodegaNombre("pequena", { corto: true })} (${numero(p.porPasar)})`, { onclick: () => vistaPasar(itemCode, { desde: "producto" }) })
+      : cajaParaPasar && boton("", "mover", `Pasar a ${bodegaNombre("pequena", { corto: true })}`, { onclick: () => vistaCaja(cajaParaPasar.codigo) }),
     supervisor && contadoEn.pequena && boton("", "contar", `Contar ${bodegaNombre("pequena", { corto: true })} de nuevo`, { onclick: () => contarPequena(p) }),
   ].filter(Boolean);
 
@@ -1559,7 +1563,8 @@ async function vistaProducto(itemCode, mensaje = null) {
     mensaje && aviso(mensaje.tipo, mensaje.texto, { role: "status" }),
     h("div", { class: "fila acciones-producto" }, acciones),
     h("p", { class: "estado-producto__texto" }, textoEstado(e),
-      e?.sinEntrega > 0 ? ` Hay ${unidadesTexto(e.sinEntrega)} preparadas sin entregar.` : ""),
+      e?.sinEntrega > 0 ? ` Hay ${unidadesTexto(e.sinEntrega)} preparadas sin entregar.` : "",
+      p.porPasar > 0 ? ` SAP ya pasó ${unidadesTexto(p.porPasar)} a ${bodegaNombre("pequena", { corto: true })}: falta marcar qué cajas.` : ""),
     h("div", { class: "bodegas ficha-bodegas" },
       tarjeta("grande", "caja", enGrande, cajasGrande ? `en ${numero(cajasGrande)} ${cajasGrande === 1 ? "caja" : "cajas"}` : "", resumenLotes(p.lotes, true)),
       tarjeta("pequena", "capas", p.pequena, Math.abs(p.pequena) === 1 ? "unidad" : "unidades",
@@ -1824,6 +1829,94 @@ function vistaReponer() {
     h("div", { class: "encabezado" }, h("div", {}, h("h1", {}, `Pasar a ${bodegaNombre("pequena", { corto: true })}`),
       h("p", { class: "encabezado__sub" }, `Unidades de una caja de ${bodegaNombre("grande", { corto: true })} a ${bodegaNombre("pequena", { corto: true })}.`))),
     lector.seccion);
+  lector.entrada.focus();
+}
+
+// Pasar a la 02 lo que SAP ya traspasó: se escanean las cajas enteras que se llevan y se pasan juntas. Las que vencen
+// primero quedan sugeridas, pero solo se pasan las elegidas (escaneadas o tocadas).
+async function vistaPasar(itemCode, { desde = "pendientes" } = {}) {
+  mostrarInventario(cargando("Cargando producto…"));
+  let p;
+  try { p = (await api.producto(itemCode)).data; } catch (error) { return mostrarError(error, () => vistaPasar(itemCode, { desde })); }
+  recordarBodegas(p.bodegas);
+  const de = bodegaNombre("grande", { corto: true }), a = bodegaNombre("pequena", { corto: true });
+  const total = p.porPasar ?? 0;
+  let cajas = p.lotes.flatMap((l) => l.cajas.filter((c) => c.unidades > 0).map((c) => ({ ...c, lote: l.lote, vencimiento: l.vencimiento })));
+  const sugeridas = new Set(sugerirCajas(cajas, total).codigos);
+  const elegidas = new Set();
+  const operaciones = new Map(); // una operación por caja: un reintento no la pasa dos veces
+  const lista = h("ul", { class: "cajas-pase" });
+  const resumen = h("div", { "aria-live": "polite" });
+  const problema = aviso("error", "", { role: "alert", hidden: true });
+  const pasar = boton("boton--principal boton--grande", "mover", "Pasar", { onclick: () => guardar() });
+  const volver = desde === "producto" ? volverA(p.itemName, () => vistaProducto(itemCode)) : volverA(`Falta pasar a ${a}`, () => vistaPendientes("pasar"));
+  const mostrarProblema = (texto) => { textoAviso(problema, texto); problema.hidden = false; };
+  function pintar() {
+    lista.replaceChildren(...cajas.map((c) => {
+      const elegida = elegidas.has(c.codigo);
+      return h("li", {}, h("button", { class: `caja-pase${elegida ? " caja-pase--elegida" : ""}`, type: "button", "aria-pressed": String(elegida),
+        onclick: () => { if (elegida) elegidas.delete(c.codigo); else elegidas.add(c.codigo); problema.hidden = true; pintar(); } },
+      icono(elegida ? "completa" : "caja"),
+      h("span", { class: "caja-pase__datos" }, h("span", { class: "codigo" }, c.codigo),
+        h("span", { class: "suave" }, `Lote ${c.lote ?? "sin lote"} · vence ${textoVencimiento(c.vencimiento)}`)),
+      sugeridas.has(c.codigo) && !elegida && insignia("gris", null, "Sugerida"),
+      h("strong", { class: "caja-pase__unidades" }, unidadesTexto(c.unidades))));
+    }));
+    const r = resumenPase(cajas.filter((c) => elegidas.has(c.codigo)), total);
+    resumen.replaceChildren(aviso(r.tipo, r.texto));
+    pasar.disabled = r.cajas === 0;
+    pasar.replaceChildren(icono("mover"), r.cajas ? `Pasar ${r.cajas === 1 ? "1 caja" : `${numero(r.cajas)} cajas`} a ${a}` : "Escaneá las cajas");
+  }
+  const lector = campoLector({ etiqueta: "Cajas que llevás", placeholder: `Escaneá la etiqueta de cada caja que llevás a ${a}`,
+    alLeer: (texto) => {
+      const codigo = texto.trim().toUpperCase();
+      if (!cajas.some((c) => c.codigo === codigo)) {
+        sonar("error");
+        return mostrarProblema(esCodigoCaja(codigo) ? `La caja ${codigo} no es de este producto o ya no tiene unidades en ${de}.`
+          : "Eso no es la etiqueta de una caja. Escaneá la etiqueta CJ- de la caja.");
+      }
+      sonar("ok"); problema.hidden = true;
+      elegidas.add(codigo);
+      pintar();
+    } });
+  async function guardar(confirmado = false) {
+    const lote = cajas.filter((c) => elegidas.has(c.codigo));
+    const r = resumenPase(lote, total);
+    if (!r.cajas) return;
+    if (!confirmado && total > 0 && r.unidades !== total) {
+      const seguir = await confirmar({ titulo: r.unidades > total ? "Son más de lo que SAP pasó" : "Son menos de lo que SAP pasó", aceptar: "Pasar igual",
+        texto: [`SAP pasó ${unidadesTexto(total)} a ${a} y las cajas elegidas tienen ${unidadesTexto(r.unidades)}.`,
+          "Si es lo que llevaste, pasalas igual: la diferencia queda a la vista para revisarla."] });
+      if (!seguir) return;
+    }
+    pasar.disabled = true; problema.hidden = true;
+    let pasadas = 0, unidades = 0;
+    for (const c of lote) {
+      const operacion = operaciones.get(c.codigo) ?? crearOperacion();
+      operaciones.set(c.codigo, operacion);
+      try {
+        await api.reponer(operacion.para({ caja: c.codigo, unidades: c.unidades }));
+        operacion.terminar();
+        pasadas++; unidades += c.unidades;
+        elegidas.delete(c.codigo);
+        cajas = cajas.filter((x) => x.codigo !== c.codigo);
+      } catch (error) {
+        if (error.status === 401) return mostrarError(error);
+        pintar();
+        return mostrarProblema(`${pasadas ? `Se pasaron ${numero(pasadas)} cajas. ` : ""}La caja ${c.codigo} no se pudo pasar: ${textoFalla(error)}`);
+      }
+    }
+    vistaProducto(itemCode, { tipo: "ok", texto: `Se ${pasadas === 1 ? "pasó 1 caja" : `pasaron ${numero(pasadas)} cajas`} (${unidadesTexto(unidades)}) a ${a}.` });
+  }
+  mostrarInventario(volver,
+    h("div", { class: "encabezado" }, h("div", {}, h("h1", {}, `Pasar a ${a}`),
+      h("p", { class: "encabezado__sub" }, p.itemName, " · ", h("span", { class: "codigo" }, p.itemCode)))),
+    total > 0 ? aviso("alerta", `SAP ya pasó ${unidadesTexto(total)} de ${de} a ${a}. Escaneá cada caja entera que llevás: pasa con su lote y vencimiento.`)
+      : aviso("info", `SAP no tiene un traspaso pendiente de este producto. Si llevaste cajas a ${a}, escanealas igual.`),
+    lector.seccion, problema,
+    cajas.length ? h("section", { class: "tarjeta" }, h("h2", {}, `Cajas en ${de}`), lista, resumen, h("div", { class: "fila" }, pasar))
+      : aviso("alerta", `No hay cajas con unidades de este producto en ${de}.`));
+  pintar();
   lector.entrada.focus();
 }
 
@@ -2174,9 +2267,10 @@ async function vistaPendientes(pestana = "ubicar") {
     if (SIN_COMPARACION.includes(error.codigo)) return pendientesSinComparacion(error);
     return mostrarError(error, () => vistaPendientes(pestana));
   }
-  estado.pendientesInventario = d.porUbicar.length + d.porDescontar.length;
-  const pestanas = [["ubicar", "Falta guardar", d.porUbicar.length], ["descontar", "Falta marcar salida", d.porDescontar.length],
-    ["historial", "Salidas marcadas", 0]];
+  const porPasar = d.porPasar ?? [];
+  estado.pendientesInventario = d.porUbicar.length + d.porDescontar.length + porPasar.length;
+  const pestanas = [["ubicar", "Falta guardar", d.porUbicar.length], ["pasar", `Falta pasar a ${bodegaNombre("pequena", { corto: true })}`, porPasar.length],
+    ["descontar", "Falta marcar salida", d.porDescontar.length], ["historial", "Salidas marcadas", 0]];
   const nav = h("nav", { class: "pestanas", "aria-label": "Pendientes del inventario" }, pestanas.map(([id, texto, n]) =>
     h("button", { class: "pestana", type: "button", "aria-current": id === pestana ? "page" : null, onclick: () => vistaPendientes(id) },
       texto, n > 0 && h("span", { class: "contador contador--alerta", "aria-label": `${n} pendientes` }, numero(n)))));
@@ -2197,6 +2291,16 @@ async function vistaPendientes(pestana = "ubicar") {
         h("p", { class: "suave" }, "Se recibió en la bodega y SAP todavía no lo registró. Se cierra solo cuando llegue la entrada de SAP."),
         h("ul", { class: "filas" }, d.faltaEnSap.map((v) => filaAdmin({ nombre: v.itemName, detalle: [h("span", { class: "codigo" }, v.itemCode)],
           dato: dato("Falta en SAP", unidadesTexto(v.faltaEnSap)), acciones: [boton("", "siguiente", "Ver", { onclick: () => vistaProducto(v.itemCode) })] })))));
+  } else if (pestana === "pasar") {
+    const de = bodegaNombre("grande", { corto: true }), a = bodegaNombre("pequena", { corto: true });
+    poner(contenido,
+      h("p", { class: "suave" }, `Traspasos que SAP ya registró de ${de} a ${a}. Llevá las cajas y escanealas para que ${a} quede con su lote y vencimiento.`),
+      porPasar.length ? h("ul", { class: "filas" }, porPasar.map((v) => filaAdmin({ nombre: v.itemName,
+        detalle: [h("span", { class: "codigo" }, v.itemCode), `SAP: ${numero(v.sapGrande)} en ${de} · ${numero(v.sapPequena)} en ${a}`],
+        dato: dato(`Pasar a ${a}`, unidadesTexto(v.unidades)),
+        acciones: [boton("boton--principal", "mover", "Pasar", { onclick: () => vistaPasar(v.itemCode) }),
+          boton("", "siguiente", "Ver", { onclick: () => vistaProducto(v.itemCode) })] })))
+        : aviso("ok", `No falta pasar nada a ${a}.`));
   } else if (pestana === "descontar") {
     contenido.replaceChildren(d.porDescontar.length
       ? h("ul", { class: "filas" }, d.porDescontar.map((v) => filaAdmin({ clase: "fila-admin--alerta", nombre: v.itemName,

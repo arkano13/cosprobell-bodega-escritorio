@@ -173,6 +173,32 @@ export function textoContado({ total, cajas = 0, etiquetas = 0 }) {
   return `${unidades(total)} en ${numero(cajas)} ${cajas === 1 ? "caja" : "cajas"}${bulto ? " y un bulto" : ""}`;
 }
 
+// Traspaso de la 01 a la 02 que SAP ya registró: se pasan cajas enteras. Sugeridas: de la que vence primero a la
+// última, hasta cubrir lo que SAP pasó. cajas: [{ codigo, unidades, vencimiento }].
+const venceEn = (c) => (c.vencimiento ? Date.parse(String(c.vencimiento).slice(0, 10)) : Infinity);
+export function sugerirCajas(cajas, total) {
+  const orden = cajas.filter((c) => c.unidades > 0).sort((a, b) => venceEn(a) - venceEn(b) || String(a.codigo).localeCompare(String(b.codigo)));
+  const codigos = [];
+  let suma = 0;
+  for (const c of orden) {
+    if (suma >= total) break;
+    codigos.push(c.codigo);
+    suma += c.unidades;
+  }
+  return { codigos, unidades: suma };
+}
+
+// Lo elegido para pasar frente a lo que SAP pasó: { tipo, texto, cajas, unidades }.
+export function resumenPase(elegidas, total) {
+  const suma = elegidas.reduce((t, c) => t + c.unidades, 0), n = elegidas.length;
+  const cajas = `${numero(n)} ${n === 1 ? "caja" : "cajas"}`;
+  if (!n) return { tipo: "info", texto: `SAP pasó ${unidades(total)}. Escaneá cada caja que llevás.`, cajas: 0, unidades: 0 };
+  if (suma === total) return { tipo: "ok", texto: `${cajas} · ${unidades(suma)}: justo lo que SAP pasó.`, cajas: n, unidades: suma };
+  return { tipo: "alerta", cajas: n, unidades: suma, texto: suma < total
+    ? `${cajas} · ${unidades(suma)} de ${numero(total)}: faltan ${numero(total - suma)}.`
+    : `${cajas} · ${unidades(suma)}: son ${numero(suma - total)} más de lo que SAP pasó (${numero(total)}).` };
+}
+
 // Lo que entra en una recepción: total de unidades y frase para confirmar.
 // Cajas por grupos (cada grupo con su lote) y lo que sobra como un bulto en la grande. filas: [{ cajas,
 // unidadesPorCaja, lote, vencimiento }], bulto: { unidades, lote, vencimiento } o null. Devuelve el cuerpo con sus
