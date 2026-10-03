@@ -189,7 +189,7 @@ import { ESTADOS, armarAsignaciones, armarConteo, armarGrupos, armarLotesDespach
   filtrosBodega, filtrosExistencias, finDeMes, nombreOpcion, textoLoteBodega,
   opcionesDescuento, quien, resumenRecepcion, revisarDespacho, sugerirAsignacion, textoAsignacion, textoDocumento, textoEstado, textoMovimiento,
   textoPorVencer, textoVencimiento, unidadesPorProducto, nombreBodega, haceTiempo, estadoSap, avanceConteo, pasosPuestaEnMarcha, armarLotesPequena,
-  armarConteoCajas, textoContado } from "../ui/js/inventario.js";
+  armarConteoCajas, textoContado, sugerirCajas, resumenPase } from "../ui/js/inventario.js";
 
 // Bodegas con su almacén asignado, como las devuelve el servidor.
 const BODEGAS = { grande: { almacen: "01", nombre: "Almacén Principal" }, pequena: { almacen: "02", nombre: "Despacho" } };
@@ -506,3 +506,17 @@ test("api: conteo de una bodega, «no hay» y recepción por lotes", async () =>
     ["POST", "/inventario/recepciones", { operacionId: "op-2", itemCode: "SH01", modo: "lotes", lotes: [{ unidades: 4, lote: "L1", vencimiento: null }], adelantar: false }],
   ]);
 });
+
+test("inventario: pasar a la 02 cajas enteras de lo que SAP traspasó", () => {
+  const cajas = [{ codigo: "CJ-000003", unidades: 20, vencimiento: "2027-05-31" }, { codigo: "CJ-000001", unidades: 20, vencimiento: "2026-12-31" },
+    { codigo: "CJ-000002", unidades: 20, vencimiento: "2026-12-31" }, { codigo: "CJ-000009", unidades: 0, vencimiento: "2026-01-31" }];
+  // Sugeridas: la que vence primero, hasta cubrir lo que SAP pasó (las vacías no cuentan).
+  assert.deepEqual(sugerirCajas(cajas, 40), { codigos: ["CJ-000001", "CJ-000002"], unidades: 40 });
+  assert.deepEqual(sugerirCajas(cajas, 30), { codigos: ["CJ-000001", "CJ-000002"], unidades: 40 });
+  assert.deepEqual(sugerirCajas(cajas, 0), { codigos: [], unidades: 0 });
+  assert.deepEqual(resumenPase([], 40), { tipo: "info", texto: "SAP pasó 40 unidades. Escaneá cada caja que llevás.", cajas: 0, unidades: 0 });
+  assert.equal(resumenPase(cajas.slice(0, 2), 40).texto, "2 cajas · 40 unidades: justo lo que SAP pasó.");
+  assert.deepEqual(resumenPase(cajas.slice(0, 1), 40), { tipo: "alerta", cajas: 1, unidades: 20, texto: "1 caja · 20 unidades de 40: faltan 20." });
+  assert.equal(resumenPase(cajas.slice(0, 3), 40).texto, "3 cajas · 60 unidades: son 20 más de lo que SAP pasó (40).");
+});
+
