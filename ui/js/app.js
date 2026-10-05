@@ -99,6 +99,7 @@ const estado = {
   sesion: guardado.leer("sesion"), // { pickingId, docEntry, docNum }
   pendientesInventario: 0, // por ubicar + por descontar, para la insignia de la sección Inventario
   desdeLista: null, // { buscar, filtro, pagina } si la ficha del producto se abrió desde la lista de productos
+  desdeBodegas: null, // { almacen, buscar, pagina } si se abrió desde la sección Bodegas
   desdeConteo: null, // "grande" o "pequena" si la ficha se abrió desde el modo conteo
   bodegas: undefined, // { grande, pequena }: el almacén de SAP de cada bodega ({ almacen, nombre } o null), al cargar el inventario
 };
@@ -177,6 +178,7 @@ function navegacion(actual) {
   const secciones = [
     { id: "pedidos", icono: "lista", texto: "Pedidos", ir: () => vistaPedidos() },
     { id: "inventario", icono: "bodega", texto: "Inventario", ir: () => vistaInventario(), n: estado.pendientesInventario },
+    { id: "bodegas", icono: "capas", texto: "Bodegas", ir: () => vistaBodegas() },
     esSupervisor() && { id: "panel", icono: "escudo", texto: "Panel del supervisor", ir: () => vistaSupervisor() },
   ].filter(Boolean);
   return h("nav", { class: "secciones", "aria-label": "Secciones" }, secciones.map((s) =>
@@ -1294,6 +1296,7 @@ const ICONO_MOVIMIENTO = { recepcion: "caja", reposicion: "mover", traspaso: "mo
   conteo: "contar", correccion: "contar" };
 
 function mostrarInventario(...nodos) { mostrarAmplio(navegacion("inventario"), ...nodos); }
+function mostrarBodegas(...nodos) { mostrarAmplio(navegacion("bodegas"), ...nodos); }
 
 // Cada bodega con el nombre que conoce la gente ("01 · Almacén Principal", corto "la 01"). Hasta que se carga el
 // inventario, o si no tiene almacén asignado, "Bodega grande" y "Bodega pequeña".
@@ -1361,7 +1364,7 @@ async function leerEnInventario(texto, proposito = null) {
 // Inicio del inventario: el lector, lo que hay que hacer hoy y las dos bodegas. Todo tiene su lugar fijo: si falta
 // un dato (por ejemplo, SAP sin datos recientes), la tarjeta queda con "—" en lugar de desaparecer.
 async function vistaInventario() {
-  estado.desdeLista = null; estado.desdeConteo = null;
+  estado.desdeLista = null; estado.desdeConteo = null; estado.desdeBodegas = null;
   mostrarInventario(cargando("Cargando inventario…"));
   let r, supervisor = null;
   try {
@@ -1554,11 +1557,12 @@ async function vistaProducto(itemCode, mensaje = null) {
     h("summary", {}, icono(nombreIcono), h("span", {}, titulo), n !== null && h("span", { class: "contador" }, numero(n))), h("div", { class: "plegado__cuerpo" }, contenido));
 
   const ORIGEN = { sap: "SAP", ficha: "Ficha del artículo", app: "Registrado en la app" };
-  const { desdeLista, desdeConteo } = estado;
-  const volver = desdeLista ? volverA("Productos", () => vistaProductos(desdeLista))
+  const { desdeLista, desdeConteo, desdeBodegas } = estado;
+  const volver = desdeBodegas ? volverA("Bodegas", () => vistaBodegas(desdeBodegas))
+    : desdeLista ? volverA("Productos", () => vistaProductos(desdeLista))
     : desdeConteo ? volverA(`Contar ${bodegaNombre(desdeConteo, { corto: true })}`, () => vistaConteo({ bodega: desdeConteo }))
       : volverInventario();
-  mostrarInventario(volver,
+  (desdeBodegas ? mostrarBodegas : mostrarInventario)(volver,
     h("div", { class: "encabezado" }, h("div", {}, h("span", { class: "rotulo" }, "Producto"), h("h1", {}, p.itemName),
       h("p", { class: "encabezado__sub" }, h("span", { class: "codigo" }, p.itemCode), " ",
         info && insignia(info.tipo, info.tipo === "ok" ? "completa" : info.tipo === "gris" ? null : "alerta", info.texto)))),
@@ -1687,7 +1691,7 @@ function contarPequena(p) {
 // que no aplica queda deshabilitado o con "—". Escribir filtra la lista; un código leído con Enter abre el producto.
 // vista "almacen" (desde el panel del supervisor): lo que SAP tiene en un almacén.
 async function vistaProductos({ vista = "todos", buscar = "", filtro = "todos", pagina = 0, almacen = null } = {}) {
-  estado.desdeLista = null; estado.desdeConteo = null;
+  estado.desdeLista = null; estado.desdeConteo = null; estado.desdeBodegas = null;
   // Los nombres de las bodegas para las pestañas, si todavía no se cargó el inventario.
   if (estado.bodegas === undefined && vista !== "almacen") {
     mostrarInventario(cargando("Cargando productos…"));
@@ -1837,6 +1841,107 @@ async function vistaProductos({ vista = "todos", buscar = "", filtro = "todos", 
   mostrarInventario(deAlmacen ? volverA("Panel del supervisor", () => vistaSupervisor("almacenes")) : volverInventario(),
     h("div", { class: "encabezado" }, h("div", {}, h("h1", {}, deAlmacen ? "Almacén de SAP" : "Productos"), h("p", { class: "encabezado__sub" }, subtitulo))),
     pestanas, h("label", { class: "buscador" }, icono("buscar"), buscador), filtros, nota, contenido, pie);
+  buscador.focus();
+  cargar();
+}
+
+// Bodegas: lo que tiene cada almacén marcado de esta bodega. Una pestaña por almacén con lo que SAP tiene ahí (en
+// stock, comprometido, pedido y disponible) y, en la de cajas y la de despacho, lo registrado en la app. Escribir filtra
+// la lista; un código leído con Enter abre el producto.
+async function vistaBodegas({ almacen = null, buscar = "", pagina = 0 } = {}) {
+  estado.desdeLista = null; estado.desdeConteo = null; estado.desdeBodegas = null;
+  mostrarBodegas(cargando("Cargando bodegas…"));
+  let almacenes;
+  // Primero la bodega de cajas, después la de despacho y el resto por código.
+  const orden = (a) => (a.bodega === "grande" ? 0 : a.bodega === "pequena" ? 1 : 2);
+  try {
+    almacenes = (await api.almacenesSap()).data.filter((a) => a.deEstaBodega)
+      .sort((a, b) => orden(a) - orden(b) || a.warehouseCode.localeCompare(b.warehouseCode));
+  } catch (error) {
+    return mostrarError(error, () => vistaBodegas({ almacen, buscar, pagina }));
+  }
+  const encabezado = h("div", { class: "encabezado" }, h("div", {}, h("h1", {}, "Bodegas"),
+    h("p", { class: "encabezado__sub" }, "Lo que tiene cada almacén de esta bodega: lo que dice SAP y, en la bodega de cajas y la de despacho, lo registrado en la app.")));
+  if (!almacenes.length) {
+    return mostrarBodegas(encabezado, aviso("info", "Todavía no hay almacenes marcados. El supervisor los marca en Panel del supervisor → Almacenes.", {},
+      esSupervisor() && boton("", "bodega", "Elegir almacenes", { onclick: () => vistaSupervisor("almacenes") })));
+  }
+  if (!almacenes.some((a) => a.warehouseCode === almacen)) almacen = (almacenes.find((a) => a.bodega === "grande") ?? almacenes[0]).warehouseCode;
+  const actual = almacenes.find((a) => a.warehouseCode === almacen);
+  const deApp = actual.bodega !== null;
+  const abrir = (itemCode) => { estado.desdeBodegas = { almacen, buscar, pagina }; vistaProducto(itemCode); };
+  const PAPEL = { grande: "Bodega de cajas completas", pequena: "Bodega de despacho (de donde salen los pedidos)" };
+
+  const pestanas = h("nav", { class: "pestanas", "aria-label": "Qué almacén" }, almacenes.map((a) =>
+    h("button", { class: "pestana", type: "button", "aria-current": a.warehouseCode === almacen ? "page" : null,
+      onclick: () => vistaBodegas({ almacen: a.warehouseCode }) },
+    `${a.warehouseCode} · ${a.warehouseName}`, h("span", { class: "contador", "aria-label": `${numero(a.productos)} productos` }, numero(a.productos)))));
+  const buscador = h("input", { class: "buscador__campo", type: "search", value: buscar, autocomplete: "off", spellcheck: "false",
+    placeholder: "Buscar por nombre o código, o escaneá el producto", "aria-label": "Buscar producto" });
+  const nota = h("div", {});
+  const contenido = h("div", { "aria-live": "polite" });
+  const pie = h("div", { class: "fila fila--entre" });
+  let vez = 0, espera = null;
+
+  function pintar(r) {
+    const cifras = `${numero(r.resumen.productos)} ${r.resumen.productos === 1 ? "producto" : "productos"} · ${unidadesTexto(r.resumen.unidades)} en stock según SAP`
+      + (deApp ? ` · ${unidadesTexto(r.resumen.enBodega ?? 0)} registradas en la app` : "");
+    poner(nota, h("div", { class: "fila fila--entre" },
+      h("div", {}, h("p", { class: "rotulo" }, actual.bodega ? PAPEL[actual.bodega] : "Almacén marcado, sin bodega asignada"),
+        h("p", { class: "cifras-bodega" }, h("strong", {}, cifras))),
+      deApp && boton("", "siguiente", "Ver por lote", { onclick: () => vistaProductos({ vista: actual.bodega }) })),
+    h("p", { class: "suave nota" }, icono("info"), `SAP: ${r.existenciasSapAl ? `existencias ${hace(r.existenciasSapAl)}` : "todavía no llegaron existencias"}.`,
+      " Disponible = en stock − comprometido en pedidos + pedido a proveedores.",
+      deApp ? ` "En la bodega" es lo registrado en la app en ${bodegaNombre(actual.bodega, { corto: true })}.` : ""));
+    if (!r.data.length) return contenido.replaceChildren(aviso("info", buscar ? `Ningún producto coincide con "${buscar}".` : "No hay productos en este almacén."));
+    const columnas = [["Producto"], ["En stock", true], ["Comprometido", true], ["Pedido", true], ["Disponible", true], deApp && ["En la bodega", true]].filter(Boolean);
+    contenido.replaceChildren(h("div", { class: "tabla-envoltura" }, h("table", { class: "tabla tabla--productos" },
+      h("thead", {}, h("tr", {}, columnas.map(([t, numerica]) => h("th", { scope: "col", class: numerica ? "tabla__numero" : null }, t)))),
+      h("tbody", {}, r.data.map((v) => h("tr", {},
+        h("th", { scope: "row" }, h("button", { class: "enlace", type: "button", onclick: () => abrir(v.itemCode) }, v.itemName),
+          h("div", { class: "codigo suave" }, v.itemCode)),
+        h("td", { class: "tabla__numero" }, h("strong", {}, numero(v.enStock))),
+        h("td", { class: "tabla__numero" }, numero(v.comprometido)),
+        h("td", { class: "tabla__numero" }, numero(v.pedido)),
+        h("td", { class: "tabla__numero" }, numero(v.disponible)),
+        deApp && h("td", { class: "tabla__numero" }, h("strong", {}, numero(v.enBodega ?? 0)),
+          v.cajas > 0 && h("div", { class: "suave" }, `${numero(v.cajas)} ${v.cajas === 1 ? "caja" : "cajas"}`))))))));
+  }
+  async function cargar() {
+    const esta = ++vez;
+    contenido.replaceChildren(cargando("Cargando productos…"));
+    let r;
+    try { r = await api.productosDeAlmacen(almacen, { buscar, pagina }); } catch (error) {
+      if (error.status === 401) return mostrarError(error);
+      return contenido.replaceChildren(aviso("error", error.mensaje, { role: "alert" }));
+    }
+    if (esta !== vez) return;
+    pintar(r);
+    const paginas = Math.max(1, Math.ceil(r.total / 50));
+    pie.replaceChildren(h("span", { class: "suave" }, `${numero(r.total)} ${r.total === 1 ? "producto" : "productos"} · página ${pagina + 1} de ${paginas}`),
+      h("div", { class: "fila" },
+        boton("", "volver", "Anterior", { disabled: pagina === 0, onclick: () => { pagina--; cargar(); } }),
+        boton("", "siguiente", "Siguiente", { disabled: pagina + 1 >= paginas, onclick: () => { pagina++; cargar(); } })));
+  }
+  buscador.addEventListener("input", () => {
+    clearTimeout(espera);
+    espera = setTimeout(() => { buscar = buscador.value.trim(); pagina = 0; cargar(); }, 350);
+  });
+  buscador.addEventListener("keydown", async (evento) => {
+    if (evento.key !== "Enter") return;
+    evento.preventDefault();
+    clearTimeout(espera);
+    const t = buscador.value.trim();
+    if (!t) return;
+    if (esCodigoCaja(t)) return vistaCaja(t.toUpperCase());
+    try {
+      const exactos = (await api.buscarProductos(t)).data.filter((p) => p.itemCode === t || p.codigos.includes(t));
+      if (exactos.length === 1) return abrir(exactos[0].itemCode);
+    } catch (error) { if (error.status === 401) return mostrarError(error); }
+    buscar = t; pagina = 0; cargar();
+  });
+  limpiezas.push(() => clearTimeout(espera));
+  mostrarBodegas(encabezado, pestanas, h("label", { class: "buscador" }, icono("buscar"), buscador), nota, contenido, pie);
   buscador.focus();
   cargar();
 }
@@ -2531,7 +2636,7 @@ const etiquetasTexto = (n) => `${numero(n)} ${n === 1 ? "etiqueta" : "etiquetas"
 
 // Elegir qué bodega contar, con el avance de cada una.
 async function elegirConteo() {
-  estado.desdeLista = null; estado.desdeConteo = null;
+  estado.desdeLista = null; estado.desdeConteo = null; estado.desdeBodegas = null;
   mostrarInventario(cargando("Cargando el conteo…"));
   let r;
   try { r = (await api.inventario()).data; } catch (error) { return mostrarError(error, () => elegirConteo()); }
@@ -2558,7 +2663,7 @@ async function elegirConteo() {
 // lote. Al guardar (o con «No hay») pasa solo al siguiente producto que falta contar. itemCode abre ese producto.
 async function vistaConteo({ bodega = null, itemCode = null } = {}) {
   if (!bodega) return elegirConteo();
-  estado.desdeLista = null; estado.desdeConteo = null;
+  estado.desdeLista = null; estado.desdeConteo = null; estado.desdeBodegas = null;
   const grande = bodega === "grande";
   mostrarInventario(cargando("Cargando el conteo…"));
   let primera;

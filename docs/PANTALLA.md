@@ -77,6 +77,15 @@ Reglas:
 - **No hay "dar de baja"** en la app: lo vencido o dañado se registra primero en SAP y después aparece en Falta marcar salida.
 - **Solo el supervisor**: cambiar el lote de una salida, contar la 02 de nuevo (por lote: una fila por cada lote que el sistema conoce y **Agregar un lote** para los que no están), corregir las unidades de una caja y ver lo que SAP tiene en cualquier almacén (**Panel → Almacenes → Ver productos**: en stock, comprometido, pedido y disponible). Las correcciones quedan como diferencia con SAP si no coinciden. Una salida de antes del control por lotes que salió de la 02 no se puede cambiar de lote.
 
+## Bodegas
+
+Sección propia (arriba, junto a Pedidos e Inventario), para operadores y supervisor: lo que tiene cada almacén marcado de esta bodega.
+
+- Una pestaña por almacén marcado en **Panel → Almacenes**, con cuántos productos tiene en SAP: primero la bodega de cajas, después la de despacho y el resto por código. Sin almacenes marcados, lo avisa (el supervisor tiene **Elegir almacenes**).
+- Encima de la lista: qué es ese almacén (bodega de cajas completas, bodega de despacho, o marcado sin bodega asignada), cuántos productos y unidades tiene según SAP y, en la de cajas y la de despacho, cuántas unidades hay registradas en la app. Dice de cuándo son las existencias de SAP.
+- La lista, producto por producto: **En stock**, **Comprometido** (en pedidos), **Pedido** (a proveedores) y **Disponible** de SAP; en la de cajas y la de despacho, además **En la bodega** (lo registrado en la app, con sus cajas en la 01), incluidos los productos que SAP no tiene en ese almacén.
+- Buscador (sin distinguir tildes ni mayúsculas); un código leído con el lector abre el producto. Desde la ficha, **Bodegas** vuelve a la misma pestaña con la búsqueda. En la de cajas y la de despacho, **Ver por lote** abre la lista de Productos de esa bodega.
+
 ## Panel del supervisor
 
 Solo para quien ingresó con rol supervisor (**Menú → Panel del supervisor** o la sección del mismo nombre). Cinco pestañas, cada una con un número de lo que espera atención:
