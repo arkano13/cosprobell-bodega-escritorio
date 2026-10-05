@@ -74,7 +74,9 @@ export function crearApi({ token, base = "", fetchImpl = (...args) => globalThis
     // porBodega: { almacenGrande, almacenPequena }, qué almacén marcado es cada bodega (null: sin asignar).
     elegirAlmacenes: (almacenes, pedidosSoloDeEstaBodega, porBodega = {}) => pedir("PUT", "/supervisor/almacenes",
       { almacenes, pedidosSoloDeEstaBodega, ...porBodega }),
-    registrarCodigo: (codigo, itemCode) => pedir("POST", "/supervisor/codigos", { codigo, itemCode }),
+    // Registrar un código de barras que SAP no tiene: cualquiera que cuente (operador o supervisor). Quitarlo, solo el supervisor.
+    registrarCodigo: (codigo, itemCode) => pedir("POST", "/inventario/codigos", { codigo, itemCode }),
+    quitarCodigo: (id) => pedir("DELETE", `/supervisor/codigos/${id}`),
     // Inventario de las dos bodegas.
     inventario: () => pedir("GET", "/inventario/resumen"),
     buscarProductos: (buscar) => pedir("GET", `/inventario/productos?${new URLSearchParams({ buscar, limit: "20" })}`),
@@ -106,6 +108,8 @@ export function crearApi({ token, base = "", fetchImpl = (...args) => globalThis
     recibir: (cuerpo) => pedir("POST", "/inventario/recepciones", cuerpo),
     reponer: (cuerpo) => pedir("POST", "/inventario/reposiciones", cuerpo),
     descontar: (cuerpo) => pedir("POST", "/inventario/descuentos", cuerpo),
+    // Aceptar un traspaso de la grande a la pequeña que SAP ya registró. cuerpo: { operacionId, itemCode, unidades, lotes }.
+    traspasar: (cuerpo) => pedir("POST", "/inventario/traspasos", cuerpo),
     cambiarLote: (id, cuerpo) => pedir("POST", `/inventario/descuentos/${id}/reasignacion`, cuerpo),
     contarPequena: (itemCode, cuerpo) => pedir("PUT", `/inventario/productos/${encodeURIComponent(itemCode)}/pequena`, cuerpo),
     corregirCaja: (id, cuerpo) => pedir("PUT", `/inventario/cajas/${id}/unidades`, cuerpo),
