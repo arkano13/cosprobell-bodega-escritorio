@@ -4,8 +4,8 @@ import { icono } from "./iconos.js";
 import { HORAS_EN_LISTA, sigueEnLista, textosPreparado } from "./preparados.js";
 import { NOMBRES_DATOS, estadoDatos, estadoOperador, puedeSerUnidad, quienConfirmo, textoCambio, textoRevision, textoSinEntrega, textoUnidad } from "./supervisor.js";
 import { ESTADOS, TEXTO_SIN_COMPARACION, armarAsignaciones, armarConteo, armarConteoCajas, armarGrupos, armarLotesDespacho, armarLotesPequena, avanceConteo,
-  cantidadMovimiento, diasParaVencer, esCodigoCaja, estadoFila, estadoSap, filtrosBodega, filtrosExistencias, finDeMes, nombreBodega, nombreOpcion, opcionesDescuento,
-  pasosPuestaEnMarcha, quien, resumenPase, resumenRecepcion, revisarDespacho, sugerirAsignacion, sugerirCajas, textoAsignacion, textoContado, textoDocumento, textoEstado, textoLoteBodega,
+  cantidadMovimiento, diasParaVencer, esCodigoCaja, pareceCodigoBarras, estadoFila, estadoSap, filtrosBodega, filtrosExistencias, finDeMes, nombreBodega, nombreOpcion, opcionesDescuento,
+  pasosPuestaEnMarcha, quien, filasTraspaso, resumenTraspaso, resumenRecepcion, revisarDespacho, sugerirAsignacion, textoAsignacion, textoContado, textoDocumento, textoEstado, textoLoteBodega,
   textoMovimiento, textoPorVencer, textoVencimiento, unidadesPorProducto } from "./inventario.js";
 import { crearOperacion } from "./operaciones.js";
 import { barras } from "./code128.js";
@@ -810,9 +810,14 @@ async function prepararDespacho(lineas) {
   }
   const { faltantes, elegir } = revisarDespacho(porProducto, fichas);
   if (faltantes.length) {
-    await informar({ titulo: `Falta mercadería en ${bodegaNombre("pequena", { corto: true })}`, texto: [
-      `No se puede finalizar hasta pasar unidades desde ${bodegaNombre("grande", { corto: true })} (Inventario → Pasar):`,
-      ...faltantes.map((f) => `• ${f.itemName}: hay ${cantidad(f.hay)} en ${bodegaNombre("pequena", { corto: true })} y se necesitan ${cantidad(f.necesarias)}.`),
+    const de = bodegaNombre("grande", { corto: true }), a = bodegaNombre("pequena", { corto: true });
+    // Si SAP ya registró el traspaso y falta aceptarlo, alcanza con aceptarlo; si no, falta el traspaso en SAP.
+    const porAceptar = (f) => fichas.get(f.itemCode)?.porPasar ?? 0;
+    await informar({ titulo: `Falta mercadería en ${a}`, texto: [
+      `No se puede finalizar hasta que ${a} tenga lo necesario:`,
+      ...faltantes.map((f) => `• ${f.itemName}: hay ${cantidad(f.hay)} en ${a} y se necesitan ${cantidad(f.necesarias)}. `
+        + (porAceptar(f) > 0 ? `SAP ya pasó ${cantidad(porAceptar(f))} desde ${de}: aceptalo en Inventario → Traspasos por aceptar.`
+          : `Falta el traspaso en SAP de ${de} a ${a}.`)),
       "La preparación queda abierta con lo escaneado." ] });
     return null;
   }
@@ -1285,7 +1290,7 @@ const fechaLocal = (iso) => (iso ? new Date(iso).toLocaleDateString("es-HN") : "
 const volverA = (texto, accion) => boton("boton--volver", "volver", texto, { onclick: accion });
 const volverInventario = () => volverA("Inventario", () => vistaInventario());
 const enteroPositivo = (valor, minimo = 1) => Number.isInteger(valor) && valor >= minimo && valor <= 1_000_000;
-const ICONO_MOVIMIENTO = { recepcion: "caja", reposicion: "mover", picking: "lista", descuento: "restar", reasignacion: "actualizar",
+const ICONO_MOVIMIENTO = { recepcion: "caja", reposicion: "mover", traspaso: "mover", picking: "lista", descuento: "restar", reasignacion: "actualizar",
   conteo: "contar", correccion: "contar" };
 
 function mostrarInventario(...nodos) { mostrarAmplio(navegacion("inventario"), ...nodos); }
@@ -1401,15 +1406,15 @@ async function vistaInventario() {
         () => vistaConteo(), "gris"),
       tarea("caja", "Falta guardar", comparar ? p.porUbicar : null,
         conDatos(`llegó en SAP y falta guardarlo en la bodega${p.actualizando > 0 ? ` · ${numero(p.actualizando)} actualizándose` : ""}`), () => vistaPendientes("ubicar")),
-      tarea("mover", `Falta pasar a ${bodegaNombre("pequena", { corto: true })}`, comparar && r.bodegas?.grande && r.bodegas?.pequena ? p.porPasar ?? 0 : null,
-        !comparar ? conDatos("") : r.bodegas?.grande && r.bodegas?.pequena ? "SAP ya lo pasó: falta marcar qué cajas" : "Falta elegir el almacén de cada bodega",
+      tarea("mover", "Traspasos por aceptar", comparar && r.bodegas?.grande && r.bodegas?.pequena ? p.porPasar ?? 0 : null,
+        !comparar ? conDatos("") : r.bodegas?.grande && r.bodegas?.pequena
+          ? `SAP pasó de ${bodegaNombre("grande", { corto: true })} a ${bodegaNombre("pequena", { corto: true })}: aceptá de qué lotes` : "Falta elegir el almacén de cada bodega",
         () => vistaPendientes("pasar")),
       tarea("restar", "Falta marcar salida", comparar ? p.porDescontar : null, conDatos("salió en SAP y falta marcar de qué lote"), () => vistaPendientes("descontar")),
       tarea("calendario", "Por vencer", vencen, textoPorVencer(r.porVencer), () => vistaPorVencer(), r.porVencer.vencidos ? "error" : "alerta")),
     h("div", { class: "acciones-inventario" },
       accion("contar", "Contar", () => vistaConteo()),
       accion("caja", "Recibir", () => vistaBuscar({ proposito: "recibir" })),
-      accion("mover", `Pasar de ${r.bodegas?.grande?.almacen ?? "grande"} a ${r.bodegas?.pequena?.almacen ?? "pequeña"}`, () => vistaReponer()),
       accion("lista", "Productos", () => vistaProductos())),
     h("div", { class: "bodegas" },
       tarjetaBodega("grande", "caja", [cifra(r.grande.cajas, "cajas"), cifra(r.grande.abiertas, "abiertas"), cifra(r.grande.productos, "productos"),
@@ -1498,9 +1503,6 @@ async function vistaProducto(itemCode, mensaje = null) {
   const cajasGrande = p.lotes.reduce((t, l) => t + l.cajas.filter((c) => c.unidades > 0).length, 0);
   const lotesPequena = (p.lotesPequena ?? []).filter((l) => l.unidades > 0);
   const contadoEn = p.contadoEn ?? { grande: true, pequena: true };
-  // La caja para pasar unidades a la de despacho: la abierta primero; si no, la que vence antes.
-  const cajasConUnidades = p.lotes.flatMap((l) => l.cajas).filter((c) => c.unidades > 0);
-  const cajaParaPasar = cajasConUnidades.find((c) => c.abierta) ?? cajasConUnidades[0] ?? null;
   // Falta contarlo en una bodega si SAP dice que ahí hay y todavía no se contó.
   const faltaContar = (bodega) => !contadoEn[bodega] && (p.sapPorBodega?.[bodega] ?? 0) > 0;
   const contar = (bodega) => faltaContar(bodega)
@@ -1511,8 +1513,8 @@ async function vistaProducto(itemCode, mensaje = null) {
     e?.estado === "por_descontar" && boton("boton--principal", "restar", "Marcar salida", { onclick: () => vistaDescontar(itemCode) }),
     contar("grande"), contar("pequena"),
     e?.estado !== "por_ubicar" && boton("", "caja", "Recibir", { onclick: () => vistaRecibir(itemCode) }),
-    p.porPasar > 0 ? boton("boton--principal", "mover", `Pasar a ${bodegaNombre("pequena", { corto: true })} (${numero(p.porPasar)})`, { onclick: () => vistaPasar(itemCode, { desde: "producto" }) })
-      : cajaParaPasar && boton("", "mover", `Pasar a ${bodegaNombre("pequena", { corto: true })}`, { onclick: () => vistaCaja(cajaParaPasar.codigo) }),
+    p.porPasar > 0 && boton("boton--principal", "mover", `Aceptar traspaso a ${bodegaNombre("pequena", { corto: true })} (${numero(p.porPasar)})`,
+      { onclick: () => vistaTraspaso(itemCode, { desde: "producto" }) }),
     supervisor && contadoEn.pequena && boton("", "contar", `Contar ${bodegaNombre("pequena", { corto: true })} de nuevo`, { onclick: () => contarPequena(p) }),
   ].filter(Boolean);
 
@@ -1564,29 +1566,46 @@ async function vistaProducto(itemCode, mensaje = null) {
     h("div", { class: "fila acciones-producto" }, acciones),
     h("p", { class: "estado-producto__texto" }, textoEstado(e),
       e?.sinEntrega > 0 ? ` Hay ${unidadesTexto(e.sinEntrega)} preparadas sin entregar.` : "",
-      p.porPasar > 0 ? ` SAP ya pasó ${unidadesTexto(p.porPasar)} a ${bodegaNombre("pequena", { corto: true })}: falta marcar qué cajas.` : ""),
+      p.porPasar > 0 ? ` SAP pasó ${unidadesTexto(p.porPasar)} a ${bodegaNombre("pequena", { corto: true })}: falta aceptar de qué lotes.` : ""),
     h("div", { class: "bodegas ficha-bodegas" },
       tarjeta("grande", "caja", enGrande, cajasGrande ? `en ${numero(cajasGrande)} ${cajasGrande === 1 ? "caja" : "cajas"}` : "", resumenLotes(p.lotes, true)),
       tarjeta("pequena", "capas", p.pequena, Math.abs(p.pequena) === 1 ? "unidad" : "unidades",
         [p.pequena < 0 && aviso("alerta", "Hay un saldo negativo antiguo. Hasta que el supervisor la cuente por lote no se puede pasar ni recibir ahí."),
           resumenLotes(lotesPequena, false)])),
-    p.codigos.length === 0 && aviso("alerta", "Este producto no tiene código de barras: no se puede escanear en pedidos. El supervisor lo puede registrar."),
+    p.codigos.length === 0 && aviso("alerta", "Este producto no tiene código de barras: no se puede escanear en pedidos. Escanealo del envase para registrarlo.", {},
+      boton("", "escaner", "Registrar código", { onclick: () => registrarCodigoEnFicha(p) })),
     plegado("caja", `Cajas de ${bodegaNombre("grande", { corto: true })}`, cajasGrande, tablaCajas),
     plegado("capas", `Lotes de ${bodegaNombre("pequena", { corto: true })}`, lotesPequena.length, tablaLotesPequena,
       lotesPequena.some((l) => !l.lote) && h("p", { class: "suave nota" }, icono("info"),
         "«Sin lote» incluye lo que había antes del control por lotes. Al contarla de nuevo se puede repartir en sus lotes.")),
     plegado("escaner", "Códigos de barras", p.codigos.length,
-      p.codigos.length > 0 && h("ul", { class: "codigos" }, p.codigos.map((c) => h("li", {}, h("span", { class: "codigo" }, c.codigo), h("span", { class: "suave" }, ORIGEN[c.origen] ?? c.origen),
-        c.confirmado ? insignia("ok", "completa", "Confirmado") : insignia("alerta", "alerta", "Sin confirmar")))),
-      supervisor && boton("", "mas", "Registrar un código", { onclick: async () => {
-        const registrado = await registrarCodigo({ producto: p });
-        if (registrado) vistaProducto(itemCode, { tipo: "ok", texto: `${registrado.codigo} quedó registrado y confirmado como unidad.` });
-      } })),
+      p.codigos.length > 0 && h("ul", { class: "codigos" }, p.codigos.map((c) => h("li", {}, h("span", { class: "codigo" }, c.codigo),
+        h("span", { class: "suave" }, c.origen === "app" && c.registradoPor ? `Registrado por ${c.registradoPor}` : ORIGEN[c.origen] ?? c.origen),
+        c.confirmado ? insignia("ok", "completa", "Confirmado") : insignia("alerta", "alerta", "Sin confirmar"),
+        supervisor && c.origen === "app" && boton("", "borrar", "Quitar", { onclick: () => quitarCodigoEnFicha(p, c), "aria-label": `Quitar el código ${c.codigo}` })))),
+      boton("", "mas", "Registrar un código", { onclick: () => registrarCodigoEnFicha(p) })),
     plegado("lista", "Documentos recientes de SAP", p.documentos.length,
       p.documentos.length ? h("ul", { class: "documentos" }, p.documentos.map((d) => h("li", {}, h("strong", {}, textoDocumento(d)),
         h("span", {}, `${fecha(d.docDate)} · ${numero(d.cantidad)} u.`), d.comentarios && h("span", { class: "suave" }, d.comentarios))))
         : h("p", { class: "suave" }, "No hay documentos de los últimos 60 días.")),
     plegado("actualizar", "Movimientos", p.movimientos.length, tablaMovimientos(p.movimientos, { conProducto: false })));
+}
+
+// Registrar un código desde la ficha (cualquiera) y quitar uno registrado desde la app (supervisor).
+async function registrarCodigoEnFicha(p) {
+  const registrado = await registrarCodigo({ producto: p });
+  if (registrado) vistaProducto(p.itemCode, { tipo: "ok", texto: `${registrado.codigo} quedó registrado y confirmado como unidad.` });
+}
+async function quitarCodigoEnFicha(p, c) {
+  if (!(await confirmar({ titulo: `¿Quitar el código ${c.codigo}?`, aceptar: "Quitar", peligro: true,
+    texto: [`Deja de ser de ${p.itemName}: al escanearlo en un pedido ya no se reconoce.`, "Si era de otro producto, después registralo para ese."] }))) return;
+  try {
+    await api.quitarCodigo(c.id);
+    vistaProducto(p.itemCode, { tipo: "ok", texto: `Se quitó el código ${c.codigo}.` });
+  } catch (error) {
+    if (error.status === 401) return mostrarError(error);
+    vistaProducto(p.itemCode, { tipo: "error", texto: textoFalla(error) });
+  }
 }
 
 // Volver a contar la bodega de despacho por lote (supervisor): una fila por lote que el sistema conoce y las que se
@@ -1832,92 +1851,99 @@ function vistaReponer() {
   lector.entrada.focus();
 }
 
-// Pasar a la 02 lo que SAP ya traspasó: se escanean las cajas enteras que se llevan y se pasan juntas. Las que vencen
-// primero quedan sugeridas, pero solo se pasan las elegidas (escaneadas o tocadas).
-async function vistaPasar(itemCode, { desde = "pendientes" } = {}) {
+// Aceptar un traspaso de la grande a la pequeña que SAP ya registró. SAP solo dice cuántas unidades pasaron: la app
+// sugiere los lotes de las cajas enteras que vencen primero y se acepta así, o se eligen otros lotes. Al aceptar se
+// restan de las cajas de la grande y se suman a la pequeña con su lote y vencimiento.
+async function vistaTraspaso(itemCode, { desde = "pendientes" } = {}) {
   mostrarInventario(cargando("Cargando producto…"));
   let p;
-  try { p = (await api.producto(itemCode)).data; } catch (error) { return mostrarError(error, () => vistaPasar(itemCode, { desde })); }
+  try { p = (await api.producto(itemCode)).data; } catch (error) { return mostrarError(error, () => vistaTraspaso(itemCode, { desde })); }
   recordarBodegas(p.bodegas);
   const de = bodegaNombre("grande", { corto: true }), a = bodegaNombre("pequena", { corto: true });
-  const total = p.porPasar ?? 0;
-  let cajas = p.lotes.flatMap((l) => l.cajas.filter((c) => c.unidades > 0).map((c) => ({ ...c, lote: l.lote, vencimiento: l.vencimiento })));
-  const sugeridas = new Set(sugerirCajas(cajas, total).codigos);
-  const elegidas = new Set();
-  const operaciones = new Map(); // una operación por caja: un reintento no la pasa dos veces
-  const lista = h("ul", { class: "cajas-pase" });
-  const resumen = h("div", { "aria-live": "polite" });
+  const volver = desde === "producto" ? volverA(p.itemName, () => vistaProducto(itemCode)) : volverA("Traspasos por aceptar", () => vistaPendientes("pasar"));
+  const encabezado = h("div", { class: "encabezado" }, h("div", {}, h("h1", {}, `Traspaso a ${a}`),
+    h("p", { class: "encabezado__sub" }, p.itemName, " · ", h("span", { class: "codigo" }, p.itemCode))));
+  const total = p.traspaso?.unidades ?? 0;
+  if (!total) {
+    return mostrarInventario(volver, encabezado, aviso("ok", `No hay un traspaso de SAP por aceptar de este producto.`),
+      boton("", "siguiente", "Ver el producto", { onclick: () => vistaProducto(itemCode) }));
+  }
+  const filas = filasTraspaso(p.lotes, p.traspaso.sugerencia);
+  const operacion = crearOperacion();
+  let eligiendo = !p.traspaso.sugerencia;
+  const cuerpo = h("div", {});
   const problema = aviso("error", "", { role: "alert", hidden: true });
-  const pasar = boton("boton--principal boton--grande", "mover", "Pasar", { onclick: () => guardar() });
-  const volver = desde === "producto" ? volverA(p.itemName, () => vistaProducto(itemCode)) : volverA(`Falta pasar a ${a}`, () => vistaPendientes("pasar"));
   const mostrarProblema = (texto) => { textoAviso(problema, texto); problema.hidden = false; };
-  function pintar() {
-    lista.replaceChildren(...cajas.map((c) => {
-      const elegida = elegidas.has(c.codigo);
-      return h("li", {}, h("button", { class: `caja-pase${elegida ? " caja-pase--elegida" : ""}`, type: "button", "aria-pressed": String(elegida),
-        onclick: () => { if (elegida) elegidas.delete(c.codigo); else elegidas.add(c.codigo); problema.hidden = true; pintar(); } },
-      icono(elegida ? "completa" : "caja"),
-      h("span", { class: "caja-pase__datos" }, h("span", { class: "codigo" }, c.codigo),
-        h("span", { class: "suave" }, `Lote ${c.lote ?? "sin lote"} · vence ${textoVencimiento(c.vencimiento)}`)),
-      sugeridas.has(c.codigo) && !elegida && insignia("gris", null, "Sugerida"),
-      h("strong", { class: "caja-pase__unidades" }, unidadesTexto(c.unidades))));
-    }));
-    const r = resumenPase(cajas.filter((c) => elegidas.has(c.codigo)), total);
-    resumen.replaceChildren(aviso(r.tipo, r.texto));
-    pasar.disabled = r.cajas === 0;
-    pasar.replaceChildren(icono("mover"), r.cajas ? `Pasar ${r.cajas === 1 ? "1 caja" : `${numero(r.cajas)} cajas`} a ${a}` : "Escaneá las cajas");
-  }
-  const lector = campoLector({ etiqueta: "Cajas que llevás", placeholder: `Escaneá la etiqueta de cada caja que llevás a ${a}`,
-    alLeer: (texto) => {
-      const codigo = texto.trim().toUpperCase();
-      if (!cajas.some((c) => c.codigo === codigo)) {
-        sonar("error");
-        return mostrarProblema(esCodigoCaja(codigo) ? `La caja ${codigo} no es de este producto o ya no tiene unidades en ${de}.`
-          : "Eso no es la etiqueta de una caja. Escaneá la etiqueta CJ- de la caja.");
+  const loteTexto = (f) => `Lote ${f.lote ?? "sin lote"} · vence ${textoVencimiento(f.vencimiento)}`;
+
+  async function aceptar(lotes, control) {
+    control.disabled = true; problema.hidden = true;
+    try {
+      const { data } = await api.traspasar(operacion.para({ itemCode, unidades: total, lotes }));
+      operacion.terminar();
+      const vacias = data.cajas.filter((c) => c.entera).map((c) => c.codigo);
+      vistaProducto(itemCode, { tipo: "ok", texto: `Listo: ${unidadesTexto(data.unidades)} pasaron a ${a} (${data.lotes.map((l) => `${l.lote ?? "sin lote"}: ${numero(l.unidades)}`).join(" · ")}).`
+        + (vacias.length ? ` ${vacias.length === 1 ? "Quedó vacía la caja" : "Quedaron vacías las cajas"} ${vacias.join(", ")}.` : "") });
+    } catch (error) {
+      control.disabled = false;
+      if (error.status === 401) return mostrarError(error);
+      if (error.codigo === "CANTIDAD_CAMBIO") {
+        return poner(cuerpo, aviso("alerta", error.mensaje, { role: "alert" }),
+          boton("boton--principal", "actualizar", "Ver de nuevo", { onclick: () => vistaTraspaso(itemCode, { desde }) }));
       }
-      sonar("ok"); problema.hidden = true;
-      elegidas.add(codigo);
-      pintar();
-    } });
-  async function guardar(confirmado = false) {
-    const lote = cajas.filter((c) => elegidas.has(c.codigo));
-    const r = resumenPase(lote, total);
-    if (!r.cajas) return;
-    if (!confirmado && total > 0 && r.unidades !== total) {
-      const seguir = await confirmar({ titulo: r.unidades > total ? "Son más de lo que SAP pasó" : "Son menos de lo que SAP pasó", aceptar: "Pasar igual",
-        texto: [`SAP pasó ${unidadesTexto(total)} a ${a} y las cajas elegidas tienen ${unidadesTexto(r.unidades)}.`,
-          "Si es lo que llevaste, pasalas igual: la diferencia queda a la vista para revisarla."] });
-      if (!seguir) return;
+      mostrarProblema(textoFalla(error));
     }
-    pasar.disabled = true; problema.hidden = true;
-    let pasadas = 0, unidades = 0;
-    for (const c of lote) {
-      const operacion = operaciones.get(c.codigo) ?? crearOperacion();
-      operaciones.set(c.codigo, operacion);
-      try {
-        await api.reponer(operacion.para({ caja: c.codigo, unidades: c.unidades }));
-        operacion.terminar();
-        pasadas++; unidades += c.unidades;
-        elegidas.delete(c.codigo);
-        cajas = cajas.filter((x) => x.codigo !== c.codigo);
-      } catch (error) {
-        if (error.status === 401) return mostrarError(error);
-        pintar();
-        return mostrarProblema(`${pasadas ? `Se pasaron ${numero(pasadas)} cajas. ` : ""}La caja ${c.codigo} no se pudo pasar: ${textoFalla(error)}`);
-      }
-    }
-    vistaProducto(itemCode, { tipo: "ok", texto: `Se ${pasadas === 1 ? "pasó 1 caja" : `pasaron ${numero(pasadas)} cajas`} (${unidadesTexto(unidades)}) a ${a}.` });
   }
-  mostrarInventario(volver,
-    h("div", { class: "encabezado" }, h("div", {}, h("h1", {}, `Pasar a ${a}`),
-      h("p", { class: "encabezado__sub" }, p.itemName, " · ", h("span", { class: "codigo" }, p.itemCode)))),
-    total > 0 ? aviso("alerta", `SAP ya pasó ${unidadesTexto(total)} de ${de} a ${a}. Escaneá cada caja entera que llevás: pasa con su lote y vencimiento.`)
-      : aviso("info", `SAP no tiene un traspaso pendiente de este producto. Si llevaste cajas a ${a}, escanealas igual.`),
-    lector.seccion, problema,
-    cajas.length ? h("section", { class: "tarjeta" }, h("h2", {}, `Cajas en ${de}`), lista, resumen, h("div", { class: "fila" }, pasar))
-      : aviso("alerta", `No hay cajas con unidades de este producto en ${de}.`));
+
+  function pintarSugerencia() {
+    const sugeridas = p.traspaso.sugerencia;
+    const aceptarBoton = boton("boton--principal boton--grande", "completa", "Aceptar", {
+      onclick: () => aceptar(sugeridas.map((l) => ({ lote: l.lote ?? null, unidades: l.unidades })), aceptarBoton) });
+    poner(cuerpo, h("section", { class: "tarjeta" }, h("h2", {}, "Sugerido"),
+      h("p", { class: "suave" }, `Lo que vence primero en ${de}, en cajas enteras cuando se puede.`),
+      h("ul", { class: "traspaso-lotes" }, sugeridas.map((l) => h("li", {}, icono("caja"),
+        h("span", { class: "traspaso-lotes__datos" }, h("strong", {}, loteTexto(l)),
+          h("span", { class: "suave" }, `${numero(l.cajas)} ${l.cajas === 1 ? "caja" : "cajas"}`)),
+        h("strong", { class: "traspaso-lotes__unidades" }, unidadesTexto(l.unidades))))),
+      problema,
+      h("div", { class: "fila" }, aceptarBoton,
+        boton("", "lista", "Elegir otros lotes", { onclick: () => { eligiendo = true; pintar(); } }))));
+    aceptarBoton.focus();
+  }
+
+  function pintarEleccion() {
+    const campos = filas.map((f, i) => h("input", { id: `traspaso-lote-${i}`, class: "campo campo--numero", type: "number", min: "0",
+      max: String(f.disponibles), step: "1", inputmode: "numeric", value: f.sugeridas ? String(f.sugeridas) : "" }));
+    const resumen = h("div", { "aria-live": "polite" });
+    const aceptarBoton = boton("boton--principal boton--grande", "completa", "Aceptar", { type: "submit" });
+    const leer = () => resumenTraspaso(filas.map((f, i) => ({ lote: f.lote, disponibles: f.disponibles,
+      unidades: campos[i].value === "" ? 0 : Number(campos[i].value) })), total);
+    const actualizar = () => { const r = leer(); poner(resumen, aviso(r.tipo, r.texto)); aceptarBoton.disabled = !r.listo; };
+    poner(cuerpo, h("form", { class: "tarjeta", oninput: actualizar, onsubmit: (evento) => {
+      evento.preventDefault();
+      const r = leer();
+      if (r.listo) aceptar(r.lotes, aceptarBoton);
+    } },
+    h("h2", {}, "¿De qué lotes salió?"),
+    h("p", { class: "suave" }, `Escribí cuántas unidades de cada lote pasaron a ${a}. Tienen que sumar ${unidadesTexto(total)}.`),
+    !p.traspaso.sugerencia && aviso("alerta", `En ${de} hay menos de lo que pasó SAP: revisá el conteo de ${de}.`),
+    filas.length ? h("ul", { class: "traspaso-lotes traspaso-lotes--elegir" }, filas.map((f, i) => h("li", {},
+      h("label", { class: "traspaso-lotes__datos", for: `traspaso-lote-${i}` }, h("strong", {}, loteTexto(f)),
+        h("span", { class: "suave" }, `Hay ${unidadesTexto(f.disponibles)} en ${de}`)),
+      campos[i])))
+      : aviso("alerta", `No hay cajas con unidades de este producto en ${de}.`),
+    resumen, problema,
+    h("div", { class: "fila" }, aceptarBoton,
+      p.traspaso.sugerencia && boton("", "volver", "Volver a lo sugerido", { onclick: () => { eligiendo = false; pintar(); } }))));
+    actualizar();
+    campos[0]?.focus();
+  }
+
+  const pintar = () => (eligiendo ? pintarEleccion() : pintarSugerencia());
+  mostrarInventario(volver, encabezado,
+    aviso("info", `SAP pasó ${unidadesTexto(total)} de ${de} a ${a}. SAP no dice de qué lotes: revisá la sugerencia y aceptá.`),
+    cuerpo);
   pintar();
-  lector.entrada.focus();
 }
 
 async function vistaCaja(codigo, mensaje = null) {
@@ -2269,7 +2295,7 @@ async function vistaPendientes(pestana = "ubicar") {
   }
   const porPasar = d.porPasar ?? [];
   estado.pendientesInventario = d.porUbicar.length + d.porDescontar.length + porPasar.length;
-  const pestanas = [["ubicar", "Falta guardar", d.porUbicar.length], ["pasar", `Falta pasar a ${bodegaNombre("pequena", { corto: true })}`, porPasar.length],
+  const pestanas = [["ubicar", "Falta guardar", d.porUbicar.length], ["pasar", "Traspasos por aceptar", porPasar.length],
     ["descontar", "Falta marcar salida", d.porDescontar.length], ["historial", "Salidas marcadas", 0]];
   const nav = h("nav", { class: "pestanas", "aria-label": "Pendientes del inventario" }, pestanas.map(([id, texto, n]) =>
     h("button", { class: "pestana", type: "button", "aria-current": id === pestana ? "page" : null, onclick: () => vistaPendientes(id) },
@@ -2294,13 +2320,13 @@ async function vistaPendientes(pestana = "ubicar") {
   } else if (pestana === "pasar") {
     const de = bodegaNombre("grande", { corto: true }), a = bodegaNombre("pequena", { corto: true });
     poner(contenido,
-      h("p", { class: "suave" }, `Traspasos que SAP ya registró de ${de} a ${a}. Llevá las cajas y escanealas para que ${a} quede con su lote y vencimiento.`),
+      h("p", { class: "suave" }, `Traspasos que SAP ya registró de ${de} a ${a} (SAP no dice de qué lotes). La app sugiere los lotes de las cajas que vencen primero: revisalos y aceptá.`),
       porPasar.length ? h("ul", { class: "filas" }, porPasar.map((v) => filaAdmin({ nombre: v.itemName,
         detalle: [h("span", { class: "codigo" }, v.itemCode), `SAP: ${numero(v.sapGrande)} en ${de} · ${numero(v.sapPequena)} en ${a}`],
-        dato: dato(`Pasar a ${a}`, unidadesTexto(v.unidades)),
-        acciones: [boton("boton--principal", "mover", "Pasar", { onclick: () => vistaPasar(v.itemCode) }),
+        dato: dato(`Pasó a ${a}`, unidadesTexto(v.unidades)),
+        acciones: [boton("boton--principal", "mover", "Revisar y aceptar", { onclick: () => vistaTraspaso(v.itemCode) }),
           boton("", "siguiente", "Ver", { onclick: () => vistaProducto(v.itemCode) })] })))
-        : aviso("ok", `No falta pasar nada a ${a}.`));
+        : aviso("ok", "No hay traspasos por aceptar."));
   } else if (pestana === "descontar") {
     contenido.replaceChildren(d.porDescontar.length
       ? h("ul", { class: "filas" }, d.porDescontar.map((v) => filaAdmin({ clase: "fila-admin--alerta", nombre: v.itemName,
@@ -2574,14 +2600,60 @@ async function vistaConteo({ bodega = null, itemCode = null } = {}) {
         if (buscar) { buscar = ""; pagina = 0; cargar(); }
         return abrir(exactos[0].itemCode);
       }
+      if (!exactos.length && pareceCodigoBarras(texto)) {
+        lector.entrada.value = "";
+        if (buscar) { buscar = ""; pagina = 0; cargar(); }
+        return codigoDesconocido(texto);
+      }
     } catch (error) { if (error.status === 401) return mostrarError(error); }
     buscar = texto; pagina = 0; cargar();
   }
 
-  function pintarAvance(a) {
+  // Un código de barras que no es de ningún producto: se registra para el que se está contando o se elige el producto.
+  function codigoDesconocido(codigo) {
+    const enPanel = actual;
+    const registrarAca = enPanel && boton("boton--principal", "completa", `Es de ${enPanel.itemName}`, { onclick: async () => {
+      registrarAca.disabled = true;
+      try {
+        const { data } = await api.registrarCodigo(codigo, enPanel.itemCode);
+        codigoRegistrado(data);
+      } catch (error) {
+        registrarAca.disabled = false;
+        if (error.status === 401) return mostrarError(error);
+        avisar("error", textoFalla(error));
+      }
+    } });
+    poner(mensaje, aviso("alerta", `El código ${codigo} no es de ningún producto.`, { role: "status", class: "lectura-desconocida" },
+      h("div", { class: "fila" }, registrarAca,
+        boton(enPanel ? "" : "boton--principal", "buscar", enPanel ? "Es de otro producto" : "Elegir de qué producto es", { onclick: async () => {
+          const data = await registrarCodigo({ codigo });
+          if (!data) return;
+          codigoRegistrado(data);
+          if (actual?.itemCode !== data.itemCode) abrir(data.itemCode);
+        } }))));
+  }
+  // Después de registrar un código: el producto abierto lo muestra y la lista se actualiza (sale de «Sin código»).
+  function codigoRegistrado(data) {
+    avisar("ok", `${data.codigo} quedó registrado para ${data.itemName}: ya se puede escanear.`);
+    if (actual?.itemCode === data.itemCode && !actual.codigos.some((c) => c.codigo === data.codigo)) {
+      actual.codigos.push({ id: data.id, codigo: data.codigo, origen: data.origen, confirmado: true });
+      pintarCodigos?.();
+    }
+    cargar();
+    lector.entrada.focus();
+  }
+  async function registrarPara(producto) {
+    const data = await registrarCodigo({ producto });
+    if (data) codigoRegistrado(data);
+  }
+
+  function pintarAvance(r) {
+    const a = r.avance;
     poner(avance, barraAvance(a, `Avance del conteo de ${corto}`));
     const falta = a.total - a.contados;
-    pestanas.replaceChildren(...[["falta", "Falta contar", falta], ["contados", "Contados", a.contados]].map(([id, texto, n]) =>
+    const opciones = [["falta", "Falta contar", falta], ["contados", "Contados", a.contados]];
+    if (r.sinCodigo !== undefined) opciones.push(["sin_codigo", "Sin código", r.sinCodigo]);
+    pestanas.replaceChildren(...opciones.map(([id, texto, n]) =>
       h("button", { class: "pestana", type: "button", "aria-current": id === lista ? "page" : null,
         onclick: () => { lista = id; pagina = 0; cargar(); } }, texto, h("span", { class: "contador" }, numero(n)))));
   }
@@ -2616,15 +2688,24 @@ async function vistaConteo({ bodega = null, itemCode = null } = {}) {
   function pintarLista(r) {
     if (!r.data.length) {
       return poner(filasLista, h("li", { class: "conteo__vacio" }, buscar ? `Ningún producto coincide con "${buscar}".`
-        : lista === "falta" ? `No falta nada por contar en ${corto}.` : "Todavía no se contó ningún producto."));
+        : lista === "falta" ? `No falta nada por contar en ${corto}.` : lista === "sin_codigo" ? `Todos los productos de ${corto} tienen código de barras.`
+          : "Todavía no se contó ningún producto."));
     }
-    poner(filasLista, r.data.map((v) => h("li", { class: `conteo__fila${actual?.itemCode === v.itemCode ? " conteo__fila--actual" : ""}`, "data-item": v.itemCode },
-      h("div", { class: "conteo__producto" }, h("strong", {}, v.itemName), h("span", { class: "codigo" }, v.itemCode)),
-      h("div", { class: "conteo__dato" }, lista === "falta" ? `SAP ${numero(v.sap)}` : textoHay(v)),
-      h("div", { class: "conteo__acciones" }, lista === "falta"
+    const acciones = (v) => {
+      if (lista === "sin_codigo") {
+        return [boton("boton--principal", "escaner", "Registrar código", { onclick: () => registrarPara(v), "aria-label": `Registrar el código de ${v.itemName}` }),
+          boton("", v.contado ? "siguiente" : "contar", v.contado ? "Ver" : "Contar", { onclick: () => abrir(v.itemCode), "aria-label": `${v.contado ? "Ver" : "Contar"} ${v.itemName}` })];
+      }
+      return lista === "falta"
         ? [boton("boton--principal", "contar", "Contar", { onclick: () => abrir(v.itemCode), "aria-label": `Contar ${v.itemName}` }),
           boton("", null, "No hay", { onclick: () => noHay(v), "aria-label": `No hay ${v.itemName}` })]
-        : boton("", "siguiente", "Ver", { onclick: () => abrir(v.itemCode), "aria-label": `Ver ${v.itemName}` })))));
+        : boton("", "siguiente", "Ver", { onclick: () => abrir(v.itemCode), "aria-label": `Ver ${v.itemName}` });
+    };
+    poner(filasLista, r.data.map((v) => h("li", { class: `conteo__fila${actual?.itemCode === v.itemCode ? " conteo__fila--actual" : ""}`, "data-item": v.itemCode },
+      h("div", { class: "conteo__producto" }, h("strong", {}, v.itemName),
+        h("span", {}, h("span", { class: "codigo" }, v.itemCode), v.codigos === 0 && lista !== "sin_codigo" && [" ", insignia("alerta", null, "Sin código")])),
+      h("div", { class: "conteo__dato" }, lista === "contados" || (lista === "sin_codigo" && v.contado) ? textoHay(v) : `SAP ${numero(v.sap)}`),
+      h("div", { class: "conteo__acciones" }, acciones(v)))));
   }
   const marcarActual = () => {
     for (const fila of filasLista.querySelectorAll(".conteo__fila")) fila.classList.toggle("conteo__fila--actual", fila.dataset.item === actual?.itemCode);
@@ -2636,7 +2717,7 @@ async function vistaConteo({ bodega = null, itemCode = null } = {}) {
         boton("", "volver", "Anterior", { disabled: pagina === 0, onclick: () => { pagina--; cargar(); } }),
         boton("", "siguiente", "Siguiente", { disabled: pagina + 1 >= paginas, onclick: () => { pagina++; cargar(); } })));
   }
-  function pintar(r) { filas = r.data; pintarAvance(r.avance); pintarLista(r); pintarPie(r); }
+  function pintar(r) { filas = r.data; pintarAvance(r); pintarLista(r); pintarPie(r); }
   async function cargar() {
     const esta = ++vez;
     let r;
@@ -2651,11 +2732,25 @@ async function vistaConteo({ bodega = null, itemCode = null } = {}) {
   }
 
   const sapEn = (p) => p.sapPorBodega?.[bodega] ?? null;
-  const cabeza = (p) => h("div", { class: "conteo__cabeza" }, h("span", { class: "rotulo" }, `Contando en ${corto}`),
-    h("h2", {}, p.itemName),
-    h("p", {}, h("span", { class: "codigo" }, p.itemCode), sapEn(p) !== null && ` · SAP tiene ${numero(sapEn(p))} en ${corto}`));
+  // Los códigos de barras del producto abierto van en la línea del encabezado; sin ninguno, un aviso para registrarlo
+  // ahí mismo escaneando el envase.
+  let pintarCodigos = null;
+  function cabeza(p) {
+    const enLinea = h("span", { class: "conteo__codigos" });
+    const zona = h("div", { class: "conteo__codigos-zona" });
+    pintarCodigos = () => {
+      poner(enLinea, p.codigos.length > 0 && [" · ", icono("escaner"), `${p.codigos.length === 1 ? "Código" : "Códigos"}: `,
+        ...p.codigos.flatMap((c, i) => [i > 0 ? ", " : null, h("span", { class: "codigo" }, c.codigo)])]);
+      poner(zona, p.codigos.length === 0 && aviso("alerta", "No tiene código de barras: no se va a poder escanear en los pedidos. Escanealo del envase para registrarlo.", {},
+        boton("boton--principal", "escaner", "Registrar código", { onclick: () => registrarPara(p) })));
+    };
+    pintarCodigos();
+    return [h("div", { class: "conteo__cabeza" }, h("span", { class: "rotulo" }, `Contando en ${corto}`),
+      h("h2", {}, p.itemName),
+      h("p", {}, h("span", { class: "codigo" }, p.itemCode), sapEn(p) !== null && ` · SAP tiene ${numero(sapEn(p))} en ${corto}`, enLinea)), zona];
+  }
   function panelVacio() {
-    actual = null; repintar = null; marcarActual();
+    actual = null; repintar = null; pintarCodigos = null; marcarActual();
     poner(panel, h("div", { class: "conteo__cabeza" }, h("span", { class: "rotulo" }, `Contando en ${corto}`), h("h2", {}, "¿Qué producto contás?")),
       h("p", { class: "suave" }, "Escaneá el producto con el lector o tocá «Contar» en la lista. Al guardar, pasa solo al siguiente que falta."),
       filas.length > 0 && lista === "falta" && boton("boton--principal", "contar", `Empezar por ${filas[0].itemName}`, { onclick: () => abrir(filas[0].itemCode) }));
@@ -2883,13 +2978,13 @@ async function panelAlmacenes(panel) {
 }
 
 // Registrar un código de barras que SAP no tiene: se escanea el envase y se elige el producto. Resuelve lo
-// registrado o null si se cancela.
-function registrarCodigo({ producto = null } = {}) {
+// registrado o null si se cancela. codigo: uno ya leído (el lector lo dejó en otra pantalla).
+function registrarCodigo({ producto = null, codigo: leido = "" } = {}) {
   return new Promise((resolver) => {
     let resuelto = false, elegido = producto, espera = null;
     const cerrar = (valor) => { resuelto = true; clearTimeout(espera); dialogo.close(); resolver(valor); };
     const error = aviso("error", "", { role: "alert", hidden: true });
-    const codigo = h("input", { id: "registro-codigo", class: "campo codigo", autocomplete: "off", spellcheck: "false", maxlength: "64" });
+    const codigo = h("input", { id: "registro-codigo", class: "campo codigo", autocomplete: "off", spellcheck: "false", maxlength: "64", value: leido || null });
     const buscar = h("input", { id: "registro-buscar", class: "campo", type: "search", autocomplete: "off", placeholder: "Nombre o código del artículo" });
     const resultados = h("ul", { class: "resultados-producto" });
     const elegidoTexto = h("p", { class: "registro__elegido" });
@@ -2936,7 +3031,7 @@ function registrarCodigo({ producto = null } = {}) {
     dialogo.onclose = () => { if (!resuelto) { clearTimeout(espera); resolver(null); } };
     pintarElegido();
     dialogo.showModal();
-    codigo.focus();
+    (leido && !producto ? buscar : codigo).focus();
   });
 }
 

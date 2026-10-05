@@ -189,7 +189,7 @@ import { ESTADOS, armarAsignaciones, armarConteo, armarGrupos, armarLotesDespach
   filtrosBodega, filtrosExistencias, finDeMes, nombreOpcion, textoLoteBodega,
   opcionesDescuento, quien, resumenRecepcion, revisarDespacho, sugerirAsignacion, textoAsignacion, textoDocumento, textoEstado, textoMovimiento,
   textoPorVencer, textoVencimiento, unidadesPorProducto, nombreBodega, haceTiempo, estadoSap, avanceConteo, pasosPuestaEnMarcha, armarLotesPequena,
-  armarConteoCajas, textoContado, sugerirCajas, resumenPase } from "../ui/js/inventario.js";
+  armarConteoCajas, textoContado, filasTraspaso, resumenTraspaso, pareceCodigoBarras } from "../ui/js/inventario.js";
 
 // Bodegas con su almacén asignado, como las devuelve el servidor.
 const BODEGAS = { grande: { almacen: "01", nombre: "Almacén Principal" }, pequena: { almacen: "02", nombre: "Despacho" } };
@@ -219,6 +219,9 @@ test("inventario: vencimiento por mes y año, días para vencer y código de caj
   assert.equal(diasParaVencer("2026-10-11", new Date(2026, 9, 1, 23, 50)), 10);
   assert.equal(diasParaVencer("2026-09-30", new Date(2026, 9, 1)), -1);
   assert.ok(esCodigoCaja(" cj-000123 ") && !esCodigoCaja("7401234567890") && !esCodigoCaja("CJ-12"));
+  // Lo que deja el lector al escanear un envase: solo números. Un nombre o un código de artículo no.
+  assert.ok(pareceCodigoBarras("7401234567890") && pareceCodigoBarras(" 12345678 "));
+  assert.ok(!pareceCodigoBarras("ER10005") && !pareceCodigoBarras("shampoo") && !pareceCodigoBarras("12345") && !pareceCodigoBarras("CJ-000123"));
 });
 
 test("inventario: textos del estado frente a SAP, movimientos y documentos", () => {
@@ -507,16 +510,22 @@ test("api: conteo de una bodega, «no hay» y recepción por lotes", async () =>
   ]);
 });
 
-test("inventario: pasar a la 02 cajas enteras de lo que SAP traspasó", () => {
-  const cajas = [{ codigo: "CJ-000003", unidades: 20, vencimiento: "2027-05-31" }, { codigo: "CJ-000001", unidades: 20, vencimiento: "2026-12-31" },
-    { codigo: "CJ-000002", unidades: 20, vencimiento: "2026-12-31" }, { codigo: "CJ-000009", unidades: 0, vencimiento: "2026-01-31" }];
-  // Sugeridas: la que vence primero, hasta cubrir lo que SAP pasó (las vacías no cuentan).
-  assert.deepEqual(sugerirCajas(cajas, 40), { codigos: ["CJ-000001", "CJ-000002"], unidades: 40 });
-  assert.deepEqual(sugerirCajas(cajas, 30), { codigos: ["CJ-000001", "CJ-000002"], unidades: 40 });
-  assert.deepEqual(sugerirCajas(cajas, 0), { codigos: [], unidades: 0 });
-  assert.deepEqual(resumenPase([], 40), { tipo: "info", texto: "SAP pasó 40 unidades. Escaneá cada caja que llevás.", cajas: 0, unidades: 0 });
-  assert.equal(resumenPase(cajas.slice(0, 2), 40).texto, "2 cajas · 40 unidades: justo lo que SAP pasó.");
-  assert.deepEqual(resumenPase(cajas.slice(0, 1), 40), { tipo: "alerta", cajas: 1, unidades: 20, texto: "1 caja · 20 unidades de 40: faltan 20." });
-  assert.equal(resumenPase(cajas.slice(0, 3), 40).texto, "3 cajas · 60 unidades: son 20 más de lo que SAP pasó (40).");
+test("inventario: aceptar el traspaso de SAP a la 02 eligiendo de qué lotes salió", () => {
+  // Los lotes de la ficha (uno por lote y vencimiento) se juntan por lote, del que vence primero al último.
+  const lotes = [{ lote: "L2", vencimiento: "2027-06-30", unidades: 48 }, { lote: "L1", vencimiento: "2027-01-31", unidades: 30 },
+    { lote: "L1", vencimiento: "2027-03-31", unidades: 24 }, { lote: null, vencimiento: null, unidades: 10 }, { lote: "L9", vencimiento: null, unidades: 0 }];
+  const filas = filasTraspaso(lotes, [{ lote: "L1", unidades: 48 }]);
+  assert.deepEqual(filas, [{ lote: "L1", vencimiento: "2027-01-31", disponibles: 54, sugeridas: 48 },
+    { lote: "L2", vencimiento: "2027-06-30", disponibles: 48, sugeridas: 0 }, { lote: null, vencimiento: null, disponibles: 10, sugeridas: 0 }]);
+  assert.deepEqual(filasTraspaso(lotes, null).map((f) => f.sugeridas), [0, 0, 0]);
+
+  const elegir = (l1, l2, sin = 0) => [{ lote: "L1", disponibles: 54, unidades: l1 }, { lote: "L2", disponibles: 48, unidades: l2 }, { lote: null, disponibles: 10, unidades: sin }];
+  assert.deepEqual(resumenTraspaso(elegir(24, 24), 48), { tipo: "ok", texto: "48 unidades: justo lo que pasó SAP.", listo: true,
+    lotes: [{ lote: "L1", unidades: 24 }, { lote: "L2", unidades: 24 }] });
+  assert.deepEqual(resumenTraspaso(elegir(24, 0), 48), { tipo: "alerta", texto: "Elegiste 24 de 48: faltan 24.", listo: false, lotes: [{ lote: "L1", unidades: 24 }] });
+  assert.equal(resumenTraspaso(elegir(48, 0, 10), 48).texto, "Elegiste 58: son 10 más de lo que pasó SAP (48).");
+  assert.deepEqual(resumenTraspaso(elegir(0, 0, 48), 48), { tipo: "error", texto: "El lote sin lote tiene 10 unidades.", listo: false, lotes: [] });
+  assert.equal(resumenTraspaso(elegir(2.5, 0), 48).listo, false);
 });
+
 

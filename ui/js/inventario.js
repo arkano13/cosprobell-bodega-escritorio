@@ -98,6 +98,9 @@ export function textoEstado(estado) {
 }
 
 export const esCodigoCaja = (texto) => /^CJ-\d{6,}$/i.test(String(texto).trim());
+// Lo que deja el lector al escanear un envase (EAN-8, UPC, EAN-13, ITF-14…): solo números. Un nombre o un código de
+// artículo escrito a mano no se toma por código de barras.
+export const pareceCodigoBarras = (texto) => /^\d{6,20}$/.test(String(texto).trim());
 
 // Vencimiento: las cajas traen mes y año ("03/2027"); se guarda el último día de ese mes.
 export function finDeMes(mes) {
@@ -120,7 +123,7 @@ export function diasParaVencer(iso, hoy = new Date()) {
 }
 
 export const NOMBRES_MOVIMIENTO = {
-  recepcion: "Entrada", reposicion: "Reposición", picking: "Salida por pedido", descuento: "Descuento de SAP",
+  recepcion: "Entrada", reposicion: "Reposición", traspaso: "Traspaso de SAP", picking: "Salida por pedido", descuento: "Descuento de SAP",
   reasignacion: "Cambio de lote", conteo: "Conteo", correccion: "Corrección de caja",
 };
 export function textoMovimiento(m) {
@@ -129,7 +132,7 @@ export function textoMovimiento(m) {
 }
 // Cantidad que mostró el movimiento: la reposición pasa de una bodega a la otra (no cambia el total).
 export function cantidadMovimiento(m, bodegas = null) {
-  if (m.tipo === "reposicion") return `${numero(m.pequena)} u. a ${nombreBodega(bodegas, "pequena", { corto: true })}`;
+  if (m.tipo === "reposicion" || m.tipo === "traspaso") return `${numero(m.pequena)} u. a ${nombreBodega(bodegas, "pequena", { corto: true })}`;
   // Cambiar el lote devuelve unidades a un lugar y las resta de otro: el total no cambia.
   if (m.tipo === "reasignacion") return "No cambia el total";
   if (m.tipo === "recepcion" && m.cajas > 0 && m.grande > 0) return `${numero(m.cajas)} ${m.cajas === 1 ? "caja" : "cajas"} · ${numero(m.grande)} u.`;
@@ -173,30 +176,37 @@ export function textoContado({ total, cajas = 0, etiquetas = 0 }) {
   return `${unidades(total)} en ${numero(cajas)} ${cajas === 1 ? "caja" : "cajas"}${bulto ? " y un bulto" : ""}`;
 }
 
-// Traspaso de la 01 a la 02 que SAP ya registró: se pasan cajas enteras. Sugeridas: de la que vence primero a la
-// última, hasta cubrir lo que SAP pasó. cajas: [{ codigo, unidades, vencimiento }].
-const venceEn = (c) => (c.vencimiento ? Date.parse(String(c.vencimiento).slice(0, 10)) : Infinity);
-export function sugerirCajas(cajas, total) {
-  const orden = cajas.filter((c) => c.unidades > 0).sort((a, b) => venceEn(a) - venceEn(b) || String(a.codigo).localeCompare(String(b.codigo)));
-  const codigos = [];
-  let suma = 0;
-  for (const c of orden) {
-    if (suma >= total) break;
-    codigos.push(c.codigo);
-    suma += c.unidades;
+// Traspaso de la 01 a la 02 que SAP ya registró (SAP no tiene lotes): la bodega acepta de qué lotes salió. Una fila por
+// lote de la grande, con lo que tiene y lo sugerido, del que vence primero al último. lotes: los de la ficha
+// ([{ lote, vencimiento, unidades }]); sugerencia: [{ lote, unidades }] o null.
+const venceEn = (l) => (l.vencimiento ? Date.parse(String(l.vencimiento).slice(0, 10)) : Infinity);
+export function filasTraspaso(lotes, sugerencia = null) {
+  const porLote = new Map();
+  for (const l of lotes) {
+    if (!(l.unidades > 0)) continue;
+    const clave = l.lote ?? "";
+    const fila = porLote.get(clave) ?? { lote: l.lote ?? null, vencimiento: l.vencimiento ?? null, disponibles: 0, sugeridas: 0 };
+    fila.disponibles += l.unidades;
+    if (l.vencimiento && (!fila.vencimiento || venceEn(l) < venceEn(fila))) fila.vencimiento = l.vencimiento;
+    porLote.set(clave, fila);
   }
-  return { codigos, unidades: suma };
+  for (const s of sugerencia ?? []) { const fila = porLote.get(s.lote ?? ""); if (fila) fila.sugeridas = s.unidades; }
+  return [...porLote.values()].sort((a, b) => venceEn(a) - venceEn(b) || String(a.lote ?? "").localeCompare(String(b.lote ?? "")));
 }
 
-// Lo elegido para pasar frente a lo que SAP pasó: { tipo, texto, cajas, unidades }.
-export function resumenPase(elegidas, total) {
-  const suma = elegidas.reduce((t, c) => t + c.unidades, 0), n = elegidas.length;
-  const cajas = `${numero(n)} ${n === 1 ? "caja" : "cajas"}`;
-  if (!n) return { tipo: "info", texto: `SAP pasó ${unidades(total)}. Escaneá cada caja que llevás.`, cajas: 0, unidades: 0 };
-  if (suma === total) return { tipo: "ok", texto: `${cajas} · ${unidades(suma)}: justo lo que SAP pasó.`, cajas: n, unidades: suma };
-  return { tipo: "alerta", cajas: n, unidades: suma, texto: suma < total
-    ? `${cajas} · ${unidades(suma)} de ${numero(total)}: faltan ${numero(total - suma)}.`
-    : `${cajas} · ${unidades(suma)}: son ${numero(suma - total)} más de lo que SAP pasó (${numero(total)}).` };
+// Lo elegido frente a lo que pasó SAP. elegidos: [{ lote, unidades, disponibles }]. Devuelve { tipo, texto, listo, lotes }:
+// listo solo si suma justo lo que pasó SAP y ningún lote pasa de lo que tiene.
+export function resumenTraspaso(elegidos, total) {
+  const usados = elegidos.filter((e) => e.unidades !== 0);
+  const invalido = usados.find((e) => !Number.isInteger(e.unidades) || e.unidades < 0);
+  if (invalido) return { tipo: "error", texto: `Revisá el lote ${invalido.lote ?? "sin lote"}: escribí un número entero.`, listo: false, lotes: [] };
+  const excede = usados.find((e) => e.unidades > e.disponibles);
+  if (excede) return { tipo: "error", texto: `El lote ${excede.lote ?? "sin lote"} tiene ${unidades(excede.disponibles)}.`, listo: false, lotes: [] };
+  const suma = usados.reduce((t, e) => t + e.unidades, 0);
+  const lotes = usados.map((e) => ({ lote: e.lote ?? null, unidades: e.unidades }));
+  if (suma === total) return { tipo: "ok", texto: `${unidades(total)}: justo lo que pasó SAP.`, listo: true, lotes };
+  return { tipo: "alerta", listo: false, lotes, texto: suma < total ? `Elegiste ${numero(suma)} de ${numero(total)}: faltan ${numero(total - suma)}.`
+    : `Elegiste ${numero(suma)}: son ${numero(suma - total)} más de lo que pasó SAP (${numero(total)}).` };
 }
 
 // Lo que entra en una recepción: total de unidades y frase para confirmar.
