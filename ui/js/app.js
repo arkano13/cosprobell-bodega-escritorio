@@ -1629,6 +1629,8 @@ function contarPequena(p, { alTerminar = (texto) => vistaProducto(p.itemCode, { 
       placeholder: lote ? `sistema: ${numero(lote.unidades)}` : "0" });
     const fila = { lote, unidades };
     if (lote) {
+      // Precargado con lo que hay: solo se cambia lo que no coincide.
+      unidades.value = String(lote.unidades);
       // La fecha se puede corregir; si no se cambia el mes, vuelve la fecha guardada tal cual.
       fila.vence = h("input", { id: `${id}-v`, class: "campo", type: "month" });
       ponerMes(fila.vence, lote.vencimiento ? String(lote.vencimiento).slice(0, 10) : null);
