@@ -105,7 +105,8 @@ export const pareceCodigoBarras = (texto) => /^\d{6,20}$/.test(String(texto).tri
 // Vencimiento: las cajas traen mes y año ("03/2027"); se guarda el último día de ese mes.
 export function finDeMes(mes) {
   const m = /^(\d{4})-(\d{2})$/.exec(mes ?? "");
-  if (!m || Number(m[2]) < 1 || Number(m[2]) > 12) return null;
+  // Año completo y razonable: un "09/8" quedaba guardado como el año 8.
+  if (!m || Number(m[2]) < 1 || Number(m[2]) > 12 || Number(m[1]) < 2000 || Number(m[1]) > 2099) return null;
   const ultimo = new Date(Date.UTC(Number(m[1]), Number(m[2]), 0)).getUTCDate();
   return `${m[1]}-${m[2]}-${String(ultimo).padStart(2, "0")}`;
 }

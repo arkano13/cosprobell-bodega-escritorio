@@ -213,6 +213,10 @@ test("inventario: vencimiento por mes y año, días para vencer y código de caj
   assert.equal(finDeMes("2027-02"), "2027-02-28");
   assert.equal(finDeMes("2028-02"), "2028-02-29");
   assert.equal(finDeMes("2027-13"), null);
+  // Año incompleto o absurdo: un "09/8" quedaba como el año 8.
+  assert.equal(finDeMes("0008-09"), null);
+  assert.equal(finDeMes("1999-12"), null);
+  assert.equal(finDeMes("2100-01"), null);
   assert.equal(textoVencimiento("2027-03-31"), "03/2027");
   assert.equal(textoVencimiento("2027-03-15"), "15/3/2027");
   assert.equal(textoVencimiento(null), "Sin vencimiento");
