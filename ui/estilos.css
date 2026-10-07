@@ -132,6 +132,9 @@ button { touch-action: manipulation; }
 .barra__operador .icono { width: 18px; height: 18px; }
 .boton.boton--barra { min-height: 48px; padding: 8px 14px; background: transparent; color: #fff; border-color: var(--lila-apagado); }
 .boton.boton--barra:hover { background: rgba(255, 255, 255, 0.1); border-color: var(--lila-texto); }
+/* Versión nueva descargada: se instala al reiniciar la app (o al cerrarla). */
+.boton.boton--novedad { background: var(--lila-fuerte); color: var(--tinta-honda); border-color: var(--lila-fuerte); font-weight: 700; }
+.boton.boton--novedad:hover { background: var(--lila); border-color: var(--lila); }
 
 /* ---------- Estructura ---------- */
 .contenido { max-width: 820px; margin: 0 auto; padding: 24px 16px 40px; }

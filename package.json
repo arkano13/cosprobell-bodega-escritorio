@@ -37,6 +37,12 @@
       "recursos/clave-ingreso.json",
       "package.json"
     ],
+    "publish": [
+      {
+        "provider": "generic",
+        "url": "https://cosprobell-backend-production.up.railway.app/actualizaciones"
+      }
+    ],
     "asar": true,
     "electronFuses": {
       "runAsNode": false,
@@ -72,5 +78,8 @@
       "icon": "build/icon.png",
       "category": "Office"
     }
+  },
+  "dependencies": {
+    "electron-updater": "^6.8.10"
   }
 }

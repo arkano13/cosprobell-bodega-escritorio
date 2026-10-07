@@ -110,6 +110,10 @@ Solo para quien ingresó con rol supervisor (**Menú → Panel del supervisor** 
 - Si la red no vuelve, la pantalla avisa "Sin conexión. N lecturas pendientes" y las guarda en el equipo. Se envían solas al volver la red (o con **Reintentar ahora**), en el mismo orden, incluso si se cerró la app.
 - Sin conexión no se pueden consultar pedidos ni empezar preparaciones.
 
+## Versión nueva
+
+Cuando la app ya descargó una versión nueva, la barra de arriba muestra **Actualizar a X.Y.Z** (en lila, junto al nombre del operador), también en la pantalla de ingreso. Al tocarlo pide confirmar: **Reiniciar y actualizar** cierra la app, instala la versión nueva y la vuelve a abrir; **Cancelar** deja todo como estaba. Conviene terminar antes lo que se esté cargando en un formulario; las lecturas sin enviar quedan guardadas en el equipo. Si nadie lo toca, la versión nueva se instala la próxima vez que se cierre la app. Cómo se publican las versiones: [README](../README.md#obtener-el-instalador).
+
 ## Impresión de etiquetas
 
 La app imprime con el diálogo de Windows (impresora común o de etiquetas). Cada etiqueta ocupa 90 mm de ancho; el código de barras es Code 128 con su zona en blanco, probado con un decodificador. Si la impresora es de etiquetas, elegir en el diálogo el tamaño de su rollo.

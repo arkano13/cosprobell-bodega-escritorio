@@ -3199,6 +3199,31 @@ function registrarCodigo({ producto = null, codigo: leido = "" } = {}) {
 // Arranque
 // ---------------------------------------------------------------------------
 
+// Versión nueva ya descargada por la app: un botón en la barra la instala reiniciando. Si nadie lo usa, se instala
+// sola al cerrar la app.
+function avisoDeActualizacion() {
+  const escritorio = window.escritorio;
+  if (!escritorio?.actualizacionPendiente) return;
+  const botonActualizar = document.getElementById("btn-actualizacion");
+  let version = null;
+  const pintar = (datos) => {
+    if (!datos?.version) return;
+    version = datos.version;
+    document.getElementById("texto-actualizacion").textContent = `Actualizar a ${version}`;
+    botonActualizar.hidden = false;
+  };
+  botonActualizar.addEventListener("click", async () => {
+    const ok = await confirmar({ titulo: `Versión ${version} lista`, aceptar: "Reiniciar y actualizar", texto: [
+      "La app se cierra, instala la versión nueva y se vuelve a abrir sola.",
+      "Terminá antes lo que estés cargando. Las lecturas sin enviar quedan guardadas en este equipo.",
+      "Si no la instalás ahora, se instala sola la próxima vez que se cierre la app.",
+    ] });
+    if (ok) await escritorio.instalarActualizacion();
+  });
+  escritorio.alActualizacionLista(pintar);
+  escritorio.actualizacionPendiente().then(pintar).catch(() => {});
+}
+
 for (const lugar of document.querySelectorAll("[data-icono]")) lugar.replaceWith(icono(lugar.dataset.icono));
 document.getElementById("btn-inicio").addEventListener("click", () => (api ? vistaPedidos() : vistaIngreso()));
 document.getElementById("btn-menu").addEventListener("click", abrirMenu);
@@ -3208,6 +3233,7 @@ window.addEventListener("online", pintarConexion);
 window.addEventListener("offline", pintarConexion);
 pintarConexion();
 actualizarBarra();
+avisoDeActualizacion();
 
 if (!api) vistaIngreso();
 else if (estado.sesion) vistaEscaneo();
