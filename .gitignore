@@ -3,3 +3,5 @@ dist/
 *.log
 # Clave de solo ingreso: la escribe GitHub Actions desde un secreto al armar el instalador.
 recursos/
+# Solo para probar la actualización automática sin instalar (la escribe la prueba).
+dev-app-update.yml

@@ -189,7 +189,7 @@ import { ESTADOS, armarAsignaciones, armarConteo, armarGrupos, armarLotesDespach
   filtrosBodega, filtrosExistencias, finDeMes, nombreOpcion, textoLoteBodega,
   opcionesDescuento, quien, resumenRecepcion, revisarDespacho, sugerirAsignacion, textoAsignacion, textoDocumento, textoEstado, textoMovimiento,
   textoPorVencer, textoVencimiento, unidadesPorProducto, nombreBodega, haceTiempo, estadoSap, avanceConteo, pasosPuestaEnMarcha, armarLotesPequena,
-  armarConteoCajas, textoContado, filasTraspaso, resumenTraspaso, pareceCodigoBarras } from "../ui/js/inventario.js";
+  armarConteoCajas, conteoGuardadoGrande, cuerpoEdicionGrande, textoContado, filasTraspaso, resumenTraspaso, pareceCodigoBarras } from "../ui/js/inventario.js";
 
 // Bodegas con su almacén asignado, como las devuelve el servidor.
 const BODEGAS = { grande: { almacen: "01", nombre: "Almacén Principal" }, pequena: { almacen: "02", nombre: "Despacho" } };
@@ -529,3 +529,23 @@ test("inventario: aceptar el traspaso de SAP a la 02 eligiendo de qué lotes sal
 });
 
 
+
+test("editar el conteo de la grande: lo guardado vuelve al formulario por lote, fecha y unidades por caja", () => {
+  const caja = (codigo, lote, vencimiento, unidades, extra = {}) => ({ codigo, lote, vencimiento, unidades, unidadesIniciales: unidades, suelto: false, ...extra });
+  const lotes = [
+    { lote: "L1", cajas: [caja("CJ-1", "L1", "2027-03-31", 20), caja("CJ-2", "L1", "2027-03-31", 20), caja("CJ-3", "L1", "2027-03-31", 12)] },
+    { lote: "L2", cajas: [caja("CJ-4", "L2", null, 24), caja("CJ-5", "L2", null, 7, { suelto: true }), caja("CJ-6", "L2", null, 24, { unidades: 0 })] },
+  ];
+  // Las cajas vacías no cuentan; las de distinta cantidad van en otra fila; lo suelto es el bulto.
+  assert.deepEqual(conteoGuardadoGrande(lotes), {
+    filas: [{ cajas: 2, unidadesPorCaja: 20, lote: "L1", vencimiento: "2027-03-31" }, { cajas: 1, unidadesPorCaja: 12, lote: "L1", vencimiento: "2027-03-31" },
+      { cajas: 1, unidadesPorCaja: 24, lote: "L2", vencimiento: null }],
+    bulto: { unidades: 7, lote: "L2", vencimiento: null } });
+  // Una caja ya usada o dos bultos: se corrige desde el producto.
+  assert.match(conteoGuardadoGrande([{ cajas: [caja("CJ-1", "L1", null, 15, { unidadesIniciales: 20 })] }]).problema, /corregí esa caja/);
+  assert.match(conteoGuardadoGrande([{ cajas: [caja("CJ-1", null, null, 3, { suelto: true }), caja("CJ-2", null, null, 4, { suelto: true })] }]).problema, /más de un bulto/);
+  // El cuerpo de la edición: grupos y bulto, también cuando solo queda un bulto.
+  assert.deepEqual(cuerpoEdicionGrande({ modo: "grupos", grupos: [{ cajas: 1 }], bulto: null }), { grupos: [{ cajas: 1 }], bulto: null });
+  assert.deepEqual(cuerpoEdicionGrande({ modo: "suelto", destino: "grande", unidades: 6, lote: "L2", vencimiento: null }),
+    { grupos: [], bulto: { unidades: 6, lote: "L2", vencimiento: null } });
+});

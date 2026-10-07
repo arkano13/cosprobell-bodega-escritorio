@@ -1,5 +1,6 @@
 # Arma el instalador de Windows en una máquina Windows de GitHub, lo prueba y lo deja para descargar.
-# Con una etiqueta vX.Y.Z (por ejemplo v1.0.1) además publica la versión en "Releases".
+# Con una etiqueta vX.Y.Z (por ejemplo v1.0.1) además publica la versión en "Releases" junto con latest.yml: las
+# apps instaladas la encuentran ahí (a través del backend) y se actualizan solas.
 name: Instalador de Windows
 
 on:
@@ -44,10 +45,18 @@ jobs:
           CSC_IDENTITY_AUTO_DISCOVERY: "false"
       - name: Prueba rápida del programa armado
         run: node test/humo.mjs "dist/win-unpacked/Bodega Cosprobell.exe"
+      # latest.yml dice a las apps instaladas cuál es la versión nueva y cómo comprobar el instalador. Con una etiqueta,
+      # la etiqueta tiene que ser la versión de package.json.
+      - name: Revisar latest.yml
+        shell: bash
+        run: node test/revisar-latest.mjs dist "${{ startsWith(github.ref, 'refs/tags/v') && github.ref_name || '' }}"
       - uses: actions/upload-artifact@v4
         with:
           name: instalador-windows
-          path: dist/*.exe
+          path: |
+            dist/*.exe
+            dist/*.exe.blockmap
+            dist/latest.yml
           if-no-files-found: error
           retention-days: 30
 
@@ -67,6 +76,6 @@ jobs:
         run: |
           gh release view "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" > /dev/null 2>&1 \
             || gh release create "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" --title "Bodega Cosprobell $GITHUB_REF_NAME" --generate-notes
-          gh release upload "$GITHUB_REF_NAME" dist/*.exe --repo "$GITHUB_REPOSITORY" --clobber
+          gh release upload "$GITHUB_REF_NAME" dist/* --repo "$GITHUB_REPOSITORY" --clobber
         env:
           GH_TOKEN: ${{ github.token }}

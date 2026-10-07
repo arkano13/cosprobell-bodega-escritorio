@@ -62,7 +62,7 @@ Los números junto a cada pestaña indican lo que espera atención.
 
 ## Actualizar o desinstalar
 
-- **Actualizar**: abrir el instalador de la versión nueva. Conserva la configuración y la preparación abierta.
+- **Actualizar**: es automático desde la versión 1.9.0. La app busca una versión nueva al abrir y cada 2 horas, la descarga sola y muestra **Actualizar a X.Y.Z** en la barra de arriba: al tocarlo y confirmar, se cierra, se instala y se vuelve a abrir. Si nadie lo toca, se instala la próxima vez que se cierre la app. Conserva la configuración, la sesión y las lecturas sin enviar. Las PCs con una versión anterior a la 1.9.0 se actualizan una sola vez a mano, abriendo el instalador nuevo.
 - **Desinstalar**: Configuración de Windows → Aplicaciones → Bodega Cosprobell. Las preferencias y la sesión del turno quedan en `%APPDATA%\Bodega Cosprobell`; borrar esa carpeta para eliminarlas.
 
 ## Obtener el instalador
@@ -78,7 +78,12 @@ Los números junto a cada pestaña indican lo que espera atención.
 
 1. Cambiar `"version"` en `package.json` (por ejemplo `1.0.1`) y subir el cambio.
 2. Crear la etiqueta con la misma versión: en GitHub, **Releases → Draft a new release → Choose a tag → `v1.0.1`** (o con git: `git tag v1.0.1` y `git push origin v1.0.1`).
-3. GitHub Actions arma el instalador y lo agrega a esa versión.
+3. GitHub Actions arma el instalador y lo agrega a esa versión junto con `latest.yml` y el `.blockmap`. Si la etiqueta no coincide con la versión de `package.json`, falla sin publicar.
+4. Las apps instaladas encuentran la versión nueva en las 2 horas siguientes (o al abrirse) y avisan en la barra.
+
+No publicar como versión oficial algo a medio probar: una vez publicada, todas las PCs la descargan. Para probar antes, usar el instalador de **Artifacts** o marcar la versión en GitHub como **pre-release** (las apps ignoran las pre-release y los borradores).
+
+**Actualización automática (una sola vez).** El repositorio es privado, así que las apps no descargan de GitHub: piden los archivos al backend (`/actualizaciones`, con su clave de ingreso) y el backend los trae de **Releases** con un token de solo lectura que nunca sale del servidor. Para crear ese token: GitHub → foto de perfil → **Settings → Developer settings → Personal access tokens → Fine-grained tokens → Generate new token**; **Repository access**: *Only select repositories* → `cosprobell-bodega-escritorio`; **Permissions → Repository permissions → Contents: Read-only** (nada más). Copiarlo a Railway, servicio del backend → **Variables** → `ACTUALIZACIONES_GITHUB_TOKEN`. El token vence: anotar la fecha y renovarlo antes; sin token las apps siguen funcionando, solo no se actualizan.
 
 **En una PC con Windows.** Con Node.js 22: `npm ci` y luego `npm run dist`. El instalador queda en `dist\`.
 
@@ -88,7 +93,7 @@ Los números junto a cada pestaña indican lo que espera atención.
 - No navega a otros sitios ni abre ventanas. La página no tiene acceso a Node ni al sistema: solo puede leer y guardar sus preferencias, ver la lista de operadores e intentar el PIN.
 - La clave de ingreso queda en el proceso principal de la app: la página nunca la ve. Aunque alguien la extraiga del programa, solo sirve para intentar PIN (con pausa y bloqueo); los datos piden la sesión de un operador.
 - El ejecutable tiene desactivadas las opciones de Electron que permitirían usarlo para correr otro código (`electronFuses` en `package.json`).
-- No se descarga nada de internet por su cuenta: ni diccionarios ni actualizaciones automáticas.
+- Lo único que descarga por su cuenta son las versiones nuevas de la app, y solo desde el backend (que las trae de Releases de este repositorio). Antes de instalar, electron-updater comprueba que el instalador tenga el sha512 que dice `latest.yml`. Como el instalador no está firmado, quien pueda publicar Releases en este repositorio puede instalar un programa en las PCs de bodega: dar permiso de escritura solo a quien corresponde.
 - La sesión del turno queda en la carpeta de datos del usuario de Windows y vence a las 12 horas. Si se pierde un equipo, desactivar a los operadores que lo usaron o cambiar sus PIN cierra sus sesiones.
 - El instalador no está firmado. Para quitar el aviso de Windows hace falta un certificado de firma de código; se configura en el workflow con los secretos `CSC_LINK` y `CSC_KEY_PASSWORD`.
 
@@ -107,9 +112,11 @@ npm run dist      # instalador de Windows (en Windows)
 | `src/` | Proceso principal: ventana, protocolo `app://bodega`, preferencias, atajos y seguridad |
 | `ui/` | La pantalla: HTML, CSS, módulos JavaScript, íconos y fuentes |
 | `build/` | Ícono de la app |
-| `test/` | Pruebas (`*.test.js`) y prueba rápida del programa armado (`humo.mjs`) |
+| `test/` | Pruebas (`*.test.js`), prueba rápida del programa armado (`humo.mjs`) y revisión de `latest.yml` (`revisar-latest.mjs`) |
 
 `BODEGA_SERVIDOR` y `BODEGA_CLAVE_INGRESO` solo se usan en desarrollo; el programa instalado usa siempre la dirección fija y la clave armada por GitHub Actions.
+
+La actualización automática solo corre en el programa instalado. Para probarla en desarrollo: `BODEGA_PROBAR_ACTUALIZACION=1` (revisa al segundo de abrir) y un `dev-app-update.yml` en la raíz con `updaterCacheDirName: <carpeta>` (está en `.gitignore`); la app tiene que tener una versión menor que la publicada.
 
 Para probar sin SAP, en el backend (base de desarrollo, nunca producción): `node scripts/datos-demo-bodega.js`, `node scripts/crear-api-key.js app-bodega-dev --solo-ingreso`, `node scripts/operadores.js crear "Prueba" 4827` y `npm run dev`. El script de datos muestra los códigos para escanear.
 

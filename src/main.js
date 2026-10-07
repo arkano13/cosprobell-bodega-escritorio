@@ -8,6 +8,7 @@ import { ORIGEN, cabeceras, resolverArchivo } from "./archivos.js";
 import { crearPreferencias } from "./preferencias.js";
 import { elegirServidor } from "./servidor.js";
 import { crearIngreso, datosIngresoValidos, leerClaveIngreso } from "./ingreso.js";
+import { iniciarActualizaciones } from "./actualizaciones.js";
 
 const RAIZ = path.join(path.dirname(fileURLToPath(import.meta.url)), "..");
 const UI = path.join(RAIZ, "ui");
@@ -26,6 +27,7 @@ let ventana = null;
 let preferencias = null;
 let servidor = null;
 let ingreso = null;
+let actualizaciones = null;
 
 app.on("web-contents-created", (_evento, contenido) => {
   const soloPropios = (evento, url) => { if (!url.startsWith(`${ORIGEN}/`)) evento.preventDefault(); };
@@ -81,6 +83,14 @@ async function iniciar() {
       evento.sender.print({ printBackground: true }, (ok, motivo) => resolver({ ok, motivo: ok ? null : String(motivo ?? "") }));
     });
   });
+  ipcMain.handle("actualizacion:pendiente", (evento) => {
+    validarRemitente(evento);
+    return actualizaciones?.pendiente() ?? null;
+  });
+  ipcMain.handle("actualizacion:instalar", (evento) => {
+    validarRemitente(evento);
+    return actualizaciones?.instalar() ?? false;
+  });
   ipcMain.handle("preferencias:guardar", (evento, cambios) => {
     validarRemitente(evento);
     const nuevas = preferencias.guardar(cambios);
@@ -90,6 +100,23 @@ async function iniciar() {
 
   aplicarInicioConWindows(preferencias.leer());
   crearVentana();
+  await activarActualizaciones(clave);
+}
+
+// Solo en el programa instalado (o en una prueba que lo pide con BODEGA_PROBAR_ACTUALIZACION).
+async function activarActualizaciones(clave) {
+  const prueba = !app.isPackaged && process.env.BODEGA_PROBAR_ACTUALIZACION === "1";
+  if (!app.isPackaged && !prueba) return;
+  const { default: electronUpdater } = await import("electron-updater");
+  // El actualizador del instalador de Windows (NSIS), el mismo que electron-updater usa por defecto en Windows.
+  const autoUpdater = new electronUpdater.NsisUpdater();
+  if (prueba) autoUpdater.forceDevUpdateConfig = true;
+  actualizaciones = iniciarActualizaciones({
+    autoUpdater, servidor, clave,
+    avisar: (datos) => ventana?.webContents.send("actualizacion:lista", datos),
+    registrar: (texto) => console.warn(texto),
+    ...(prueba ? { primeraMs: 1000 } : {}),
+  });
 }
 
 async function servirArchivo(solicitud) {

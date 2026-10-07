@@ -1,7 +1,7 @@
 {
   "name": "cosprobell-bodega-escritorio",
   "productName": "Bodega Cosprobell",
-  "version": "1.8.0",
+  "version": "1.9.0",
   "description": "App de escritorio para Windows de la pantalla de bodega de Cosprobell",
   "author": "Cosprobell",
   "repository": {
@@ -36,6 +36,12 @@
       "build/icon.png",
       "recursos/clave-ingreso.json",
       "package.json"
+    ],
+    "publish": [
+      {
+        "provider": "generic",
+        "url": "https://cosprobell-backend-production.up.railway.app/actualizaciones"
+      }
     ],
     "asar": true,
     "electronFuses": {
@@ -72,5 +78,8 @@
       "icon": "build/icon.png",
       "category": "Office"
     }
+  },
+  "dependencies": {
+    "electron-updater": "^6.8.10"
   }
 }
