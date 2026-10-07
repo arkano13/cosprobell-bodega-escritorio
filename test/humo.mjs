@@ -40,7 +40,7 @@ try {
     process: typeof process,
     puente: Object.keys(window.escritorio ?? {}).sort().join(","),
   }));
-  const esperado = { titulo: "Bodega · Cosprobell", require: "undefined", process: "undefined", puente: "guardarPreferencias,imprimir,ingresar,obtenerPreferencias,operadores" };
+  const esperado = { titulo: "Bodega · Cosprobell", require: "undefined", process: "undefined", puente: "actualizacionPendiente,alActualizacionLista,guardarPreferencias,imprimir,ingresar,instalarActualizacion,obtenerPreferencias,operadores" };
   if (JSON.stringify(estado) !== JSON.stringify(esperado)) fallar(`Estado inesperado: ${JSON.stringify(estado)}`);
   const servidor = (await pagina.evaluate(() => window.escritorio.obtenerPreferencias())).servidor;
   await pagina.click("#btn-menu");
