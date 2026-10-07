@@ -169,6 +169,31 @@ export function armarConteoCajas(filas, bulto = null) {
   return { cuerpo: { modo: "grupos", grupos: g.grupos, bulto: g.bulto }, total: g.total, cajas: g.cajas, etiquetas: g.etiquetas };
 }
 
+// Lo guardado en la grande, para editar el conteo (supervisor): una fila por lote, vencimiento y unidades por caja, y
+// el bulto. lotes: los de la ficha ([{ cajas: [{ lote, vencimiento, unidades, unidadesIniciales, suelto }] }]). Solo con
+// cajas sin usar, y con un bulto como mucho (el formulario tiene uno). Devuelve { filas, bulto } o { problema }.
+export function conteoGuardadoGrande(lotes) {
+  const cajas = lotes.flatMap((l) => l.cajas ?? []).filter((c) => c.unidades > 0);
+  if (cajas.some((c) => c.unidades !== c.unidadesIniciales)) {
+    return { problema: "Ya se sacaron unidades de alguna caja de este producto: corregí esa caja desde el producto." };
+  }
+  const bultos = cajas.filter((c) => c.suelto);
+  if (bultos.length > 1) return { problema: "Este producto tiene más de un bulto en la grande: corregí las cajas desde el producto." };
+  const filas = new Map();
+  for (const c of cajas.filter((c) => !c.suelto)) {
+    const clave = JSON.stringify([c.lote ?? null, c.vencimiento ?? null, c.unidades]);
+    if (!filas.has(clave)) filas.set(clave, { cajas: 0, unidadesPorCaja: c.unidades, lote: c.lote ?? null, vencimiento: c.vencimiento ?? null });
+    filas.get(clave).cajas += 1;
+  }
+  const b = bultos[0];
+  return { filas: [...filas.values()], bulto: b ? { unidades: b.unidades, lote: b.lote ?? null, vencimiento: b.vencimiento ?? null } : null };
+}
+
+// Cuerpo de la edición del conteo de la grande ({ grupos, bulto }) a partir de lo que armó armarConteoCajas.
+export const cuerpoEdicionGrande = (cuerpo) => (cuerpo.modo === "suelto"
+  ? { grupos: [], bulto: { unidades: cuerpo.unidades, lote: cuerpo.lote ?? null, vencimiento: cuerpo.vencimiento ?? null } }
+  : { grupos: cuerpo.grupos, bulto: cuerpo.bulto ?? null });
+
 // "77 en 5 cajas y un bulto", "14 unidades".
 export function textoContado({ total, cajas = 0, etiquetas = 0 }) {
   const bulto = etiquetas > cajas;

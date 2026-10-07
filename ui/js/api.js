@@ -113,5 +113,6 @@ export function crearApi({ token, base = "", fetchImpl = (...args) => globalThis
     cambiarLote: (id, cuerpo) => pedir("POST", `/inventario/descuentos/${id}/reasignacion`, cuerpo),
     contarPequena: (itemCode, cuerpo) => pedir("PUT", `/inventario/productos/${encodeURIComponent(itemCode)}/pequena`, cuerpo),
     corregirCaja: (id, cuerpo) => pedir("PUT", `/inventario/cajas/${id}/unidades`, cuerpo),
+    editarConteoGrande: (itemCode, cuerpo) => pedir("PUT", `/inventario/productos/${encodeURIComponent(itemCode)}/grande`, cuerpo),
   };
 }

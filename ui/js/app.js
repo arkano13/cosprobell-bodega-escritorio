@@ -3,7 +3,7 @@ import { crearColaLecturas } from "./lecturas.js";
 import { icono } from "./iconos.js";
 import { HORAS_EN_LISTA, sigueEnLista, textosPreparado } from "./preparados.js";
 import { NOMBRES_DATOS, estadoDatos, estadoOperador, puedeSerUnidad, quienConfirmo, textoCambio, textoRevision, textoSinEntrega, textoUnidad } from "./supervisor.js";
-import { ESTADOS, TEXTO_SIN_COMPARACION, armarAsignaciones, armarConteo, armarConteoCajas, armarGrupos, armarLotesDespacho, armarLotesPequena, avanceConteo,
+import { ESTADOS, TEXTO_SIN_COMPARACION, armarAsignaciones, armarConteo, armarConteoCajas, conteoGuardadoGrande, cuerpoEdicionGrande, armarGrupos, armarLotesDespacho, armarLotesPequena, avanceConteo,
   cantidadMovimiento, diasParaVencer, esCodigoCaja, pareceCodigoBarras, estadoFila, estadoSap, filtrosBodega, filtrosExistencias, finDeMes, nombreBodega, nombreOpcion, opcionesDescuento,
   pasosPuestaEnMarcha, quien, filasTraspaso, resumenTraspaso, resumenRecepcion, revisarDespacho, sugerirAsignacion, textoAsignacion, textoContado, textoDocumento, textoEstado, textoLoteBodega,
   textoMovimiento, textoPorVencer, textoVencimiento, unidadesPorProducto } from "./inventario.js";
@@ -1518,7 +1518,9 @@ async function vistaProducto(itemCode, mensaje = null) {
     e?.estado !== "por_ubicar" && boton("", "caja", "Recibir", { onclick: () => vistaRecibir(itemCode) }),
     p.porPasar > 0 && boton("boton--principal", "mover", `Aceptar traspaso a ${bodegaNombre("pequena", { corto: true })} (${numero(p.porPasar)})`,
       { onclick: () => vistaTraspaso(itemCode, { desde: "producto" }) }),
-    supervisor && contadoEn.pequena && boton("", "contar", `Contar ${bodegaNombre("pequena", { corto: true })} de nuevo`, { onclick: () => contarPequena(p) }),
+    supervisor && contadoEn.grande && boton("", "contar", `Editar conteo de ${bodegaNombre("grande", { corto: true })}`,
+      { onclick: () => vistaConteo({ bodega: "grande", itemCode, editar: true }) }),
+    supervisor && contadoEn.pequena && boton("", "contar", `Editar conteo de ${bodegaNombre("pequena", { corto: true })}`, { onclick: () => contarPequena(p) }),
   ].filter(Boolean);
 
   const vencido = (iso) => { const dias = diasParaVencer(iso); return dias !== null && dias < 0; };
@@ -1614,7 +1616,7 @@ async function quitarCodigoEnFicha(p, c) {
 
 // Volver a contar la bodega de despacho por lote (supervisor): una fila por lote que el sistema conoce y las que se
 // agreguen. Reemplaza lo que había. Se manda el detalle siempre, así cada unidad conserva su lote.
-function contarPequena(p) {
+function contarPequena(p, { alTerminar = (texto) => vistaProducto(p.itemCode, { tipo: "ok", texto }) } = {}) {
   const operacion = crearOperacion();
   const error = aviso("error", "", { role: "alert", hidden: true });
   const total = h("p", { class: "conteo__total", "aria-live": "polite" });
@@ -1666,15 +1668,15 @@ function contarPequena(p) {
       const { data } = await api.contarPequena(p.itemCode, operacion.para({ unidades: r.unidades, lotes: r.lotes }));
       operacion.terminar();
       dialogo.close();
-      vistaProducto(p.itemCode, { tipo: "ok", texto: data.cambio === 0 ? "Conteo guardado: el total coincide con el sistema."
-        : `${conMayuscula(bodegaNombre("pequena", { corto: true }))} quedó con ${unidadesTexto(data.pequena)} (${data.cambio > 0 ? "+" : ""}${numero(data.cambio)}).` });
+      alTerminar(data.cambio === 0 ? "Conteo guardado: el total coincide con el sistema."
+        : `${conMayuscula(bodegaNombre("pequena", { corto: true }))} quedó con ${unidadesTexto(data.pequena)} (${data.cambio > 0 ? "+" : ""}${numero(data.cambio)}).`);
     } catch (e) {
       guardar.disabled = false;
       if (e.status === 401) { dialogo.close(); return mostrarError(e); }
       textoAviso(error, textoFalla(e)); error.hidden = false;
     }
   } },
-  h("div", { class: "dialogo__cuerpo" }, h("h2", {}, `Contar ${bodegaNombre("pequena", { corto: true })} de nuevo`),
+  h("div", { class: "dialogo__cuerpo" }, h("h2", {}, `Editar conteo de ${bodegaNombre("pequena", { corto: true })}`),
     h("p", {}, `${p.itemName}. Contá cada lote por separado. Si encontrás un lote que no está en la lista, agregalo.`),
     error, lista,
     h("button", { class: "boton", type: "button", onclick: () => agregar().focus() }, icono("mas"), "Agregar un lote"),
@@ -2136,14 +2138,18 @@ const numeroCampo = (id, valor = "") => h("input", { id, class: "campo campo--nu
 const textoCampo = (id) => h("input", { id, class: "campo codigo", maxlength: "60", autocomplete: "off", spellcheck: "false" });
 const mesCampo = (id) => h("input", { id, class: "campo", type: "month" });
 const mes = (entrada) => (entrada.value ? finDeMes(entrada.value) : null);
+// Al editar lo guardado: el mes se muestra y, si no se cambia, vuelve la fecha exacta que tenía (así la caja no cambia).
+const ponerMes = (entrada, fecha) => { entrada.value = fecha ? String(fecha).slice(0, 7) : ""; entrada.dataset.guardado = fecha ?? ""; };
+const mesGuardado = (entrada) => (entrada.value && entrada.dataset.guardado?.startsWith(entrada.value) ? entrada.dataset.guardado : mes(entrada));
 const numeroDe = (entrada) => (entrada.value === "" ? null : Number(entrada.value));
 // Quitar una fila cambia el total: se avisa al formulario como si se hubiera escrito.
 const avisarCambio = (elemento) => elemento.dispatchEvent(new Event("input", { bubbles: true }));
 
 // Cajas por lote (bodega de cajas): una fila por lote, o por cantidad distinta dentro de un lote, y lo que sobra
 // suelto como un bulto con etiqueta. Los id llevan el prefijo: rec-cajas, rec-por-caja, rec-lote, rec-vence, rec-g1-cajas…,
-// rec-bulto, rec-bulto-lote y rec-bulto-vence. cajas: lo que trae escrito la primera fila.
-function formularioCajas({ prefijo, sugerencia = null, cajas = "1" }) {
+// rec-bulto, rec-bulto-lote y rec-bulto-vence. cajas: lo que trae escrito la primera fila. valores: lo ya guardado
+// ({ filas, bulto }, de conteoGuardadoGrande), para editar el conteo.
+function formularioCajas({ prefijo, sugerencia = null, cajas = "1", valores = null }) {
   const filas = [];
   const lista = h("ol", { class: "grupos-cajas" });
   let siguiente = 0;
@@ -2162,9 +2168,13 @@ function formularioCajas({ prefijo, sugerencia = null, cajas = "1" }) {
     lista.append(f.elemento);
     return f;
   }
-  agregar();
+  for (const v of valores?.filas?.length ? valores.filas : [null]) {
+    const f = agregar();
+    if (v) { f.cajas.value = String(v.cajas); f.porCaja.value = String(v.unidadesPorCaja); f.lote.value = v.lote ?? ""; ponerMes(f.vence, v.vencimiento); }
+  }
   const bulto = { unidades: h("input", { id: `${prefijo}-bulto`, class: "campo campo--numero", type: "number", min: "1", inputmode: "numeric", placeholder: "0" }),
     lote: textoCampo(`${prefijo}-bulto-lote`), vence: mesCampo(`${prefijo}-bulto-vence`) };
+  if (valores?.bulto) { bulto.unidades.value = String(valores.bulto.unidades); bulto.lote.value = valores.bulto.lote ?? ""; ponerMes(bulto.vence, valores.bulto.vencimiento); }
   const elemento = h("div", {},
     h("p", { class: "suave" }, "Una fila por cada lote. Si dentro de un lote hay cajas con distinta cantidad, poné una fila por cada cantidad.",
       sugerencia ? ` La última vez vino en cajas de ${numero(sugerencia.unidadesPorCaja)}.` : ""),
@@ -2178,8 +2188,8 @@ function formularioCajas({ prefijo, sugerencia = null, cajas = "1" }) {
     elemento,
     // { filas: [{ cajas, unidadesPorCaja, lote, vencimiento }], bulto } con null en lo que está vacío.
     leer: () => ({
-      filas: filas.map((f) => ({ cajas: numeroDe(f.cajas), unidadesPorCaja: numeroDe(f.porCaja), lote: f.lote.value.trim() || null, vencimiento: mes(f.vence) })),
-      bulto: bulto.unidades.value === "" ? null : { unidades: Number(bulto.unidades.value), lote: bulto.lote.value.trim() || null, vencimiento: mes(bulto.vence) },
+      filas: filas.map((f) => ({ cajas: numeroDe(f.cajas), unidadesPorCaja: numeroDe(f.porCaja), lote: f.lote.value.trim() || null, vencimiento: mesGuardado(f.vence) })),
+      bulto: bulto.unidades.value === "" ? null : { unidades: Number(bulto.unidades.value), lote: bulto.lote.value.trim() || null, vencimiento: mesGuardado(bulto.vence) },
     }),
     meses: () => [...filas.map((f) => f.vence), bulto.vence],
     enfocar: () => filas[0].cajas.focus(),
@@ -2661,7 +2671,7 @@ async function elegirConteo() {
 
 // En la de cajas se cuentan las cajas de cada lote y lo suelto como un bulto; en la de despacho, las unidades de cada
 // lote. Al guardar (o con «No hay») pasa solo al siguiente producto que falta contar. itemCode abre ese producto.
-async function vistaConteo({ bodega = null, itemCode = null } = {}) {
+async function vistaConteo({ bodega = null, itemCode = null, editar: editarAlAbrir = false } = {}) {
   if (!bodega) return elegirConteo();
   estado.desdeLista = null; estado.desdeConteo = null; estado.desdeBodegas = null;
   const grande = bodega === "grande";
@@ -2860,7 +2870,7 @@ async function vistaConteo({ bodega = null, itemCode = null } = {}) {
       h("p", { class: "suave" }, "Escaneá el producto con el lector o tocá «Contar» en la lista. Al guardar, pasa solo al siguiente que falta."),
       filas.length > 0 && lista === "falta" && boton("boton--principal", "contar", `Empezar por ${filas[0].itemName}`, { onclick: () => abrir(filas[0].itemCode) }));
   }
-  async function abrir(codigo) {
+  async function abrir(codigo, { editarlo = false } = {}) {
     const esta = ++vezPanel;
     poner(panel, cargando("Cargando producto…"));
     let p;
@@ -2871,7 +2881,7 @@ async function vistaConteo({ bodega = null, itemCode = null } = {}) {
     if (esta !== vezPanel) return;
     actual = p; repintar = null;
     marcarActual();
-    if (p.contadoEn?.[bodega]) return yaContado(p);
+    if (p.contadoEn?.[bodega]) return editarlo && esSupervisor() ? editar(p) : yaContado(p);
     formulario(p);
   }
   function verProducto(itemCode) { estado.desdeConteo = bodega; vistaProducto(itemCode); }
@@ -2881,15 +2891,35 @@ async function vistaConteo({ bodega = null, itemCode = null } = {}) {
     const proximo = filas.find((v) => lista === "falta" && v.itemCode !== p.itemCode);
     poner(panel, cabeza(p),
       aviso("ok", `Ya está contado en ${corto}: ${unidadesEn ? textoContado({ total: unidadesEn, cajas, etiquetas: cajas }) : "no hay"}.`),
-      h("p", { class: "suave" }, grande ? "Para corregir una caja, abrila desde el producto." : "Para contarlo de nuevo, el supervisor usa «Contar de nuevo» en el producto."),
-      h("div", { class: "fila" }, boton("", "siguiente", "Ver el producto", { onclick: () => verProducto(p.itemCode) }),
+      h("p", { class: "suave" }, esSupervisor() ? "Si faltó un lote o una fecha está mal, editá el conteo: se abre con lo que se guardó."
+        : "Si faltó algo, avisale al supervisor: él puede editar el conteo."),
+      h("div", { class: "fila" },
+        esSupervisor() && boton("boton--principal", "contar", "Editar conteo", { onclick: () => editar(p) }),
+        boton("", "siguiente", "Ver el producto", { onclick: () => verProducto(p.itemCode) }),
         proximo && boton("boton--principal", "contar", "Siguiente que falta", { onclick: () => abrir(proximo.itemCode) })));
   }
 
-  function formulario(p) {
+  // Editar un conteo ya cerrado (supervisor). La grande abre este mismo formulario con lo guardado; la pequeña, el
+  // conteo por lotes con sus lotes. Si alguna caja ya se usó, se corrige desde el producto.
+  function editar(p) {
+    if (!grande) return contarPequena(p, { alTerminar: (texto) => despuesDeEditar(p, texto) });
+    const guardado = conteoGuardadoGrande(p.lotes);
+    if (guardado.problema) {
+      return poner(panel, cabeza(p), aviso("alerta", guardado.problema, { role: "alert" }),
+        h("div", { class: "fila" }, boton("", "siguiente", "Ver el producto", { onclick: () => verProducto(p.itemCode) })));
+    }
+    formulario(p, { edicion: guardado });
+  }
+  async function despuesDeEditar(p, texto) {
+    await cargar();
+    avisar("ok", texto);
+    return abrir(p.itemCode);
+  }
+
+  function formulario(p, { edicion = null } = {}) {
     const operacion = crearOperacion();
     const sap = sapEn(p);
-    const campos = grande ? formularioCajas({ prefijo: "conteo", sugerencia: p.sugerencia, cajas: "" }) : formularioLotes({ prefijo: "conteo" });
+    const campos = grande ? formularioCajas({ prefijo: "conteo", sugerencia: p.sugerencia, cajas: "", valores: edicion }) : formularioLotes({ prefijo: "conteo" });
     const total = h("p", { class: "conteo__total", "aria-live": "polite" });
     const problema = aviso("error", "", { role: "alert", hidden: true });
     const guardar = boton("boton--principal boton--grande", "completa", "Guardar", { type: "submit" });
@@ -2901,8 +2931,9 @@ async function vistaConteo({ bodega = null, itemCode = null } = {}) {
     }
     function pintarFormulario() {
       const r = leerConteo();
-      const etiquetas = r.problema ? 0 : r.etiquetas;
-      guardar.replaceChildren(icono(etiquetas ? "impresora" : "completa"), !etiquetas ? "Guardar"
+      // Al editar, solo las cajas nuevas llevan etiqueta (se informa al guardar): el botón no cuenta las que ya tienen.
+      const etiquetas = r.problema || edicion ? 0 : r.etiquetas;
+      guardar.replaceChildren(icono(etiquetas ? "impresora" : "completa"), !etiquetas ? (edicion ? "Guardar cambios" : "Guardar")
         : imprimirAlGuardar() ? `Guardar e imprimir ${etiquetasTexto(etiquetas)}` : `Guardar (${etiquetasTexto(etiquetas)} a la cola)`);
       total.textContent = r.problema ? "" : `Contaste ${textoContado(r)}.${sap !== null ? ` SAP tiene ${numero(sap)} en ${corto}.` : ""}`;
     }
@@ -2913,6 +2944,7 @@ async function vistaConteo({ bodega = null, itemCode = null } = {}) {
       if (r.problema) return mostrarProblema(r.problema);
       if (campos.meses().some((m) => m.value && !finDeMes(m.value))) return mostrarProblema("Un vencimiento no es válido.");
       problema.hidden = true; guardar.disabled = true;
+      if (edicion) return guardarEdicion(r);
       try {
         const { data } = await api.recibir(operacion.para({ itemCode: p.itemCode, ...r.cuerpo, adelantar }));
         operacion.terminar();
@@ -2930,13 +2962,36 @@ async function vistaConteo({ bodega = null, itemCode = null } = {}) {
         mostrarProblema(textoFalla(error));
       }
     }
+    // Edición: el formulario dice cómo queda todo en la grande. Las cajas que no cambian conservan su etiqueta; las nuevas
+    // se imprimen y las anuladas hay que retirarlas (se avisa con un diálogo para que no pase de largo).
+    async function guardarEdicion(r) {
+      try {
+        const { data } = await api.editarConteoGrande(p.itemCode, operacion.para(cuerpoEdicionGrande(r.cuerpo)));
+        operacion.terminar();
+        if (data.anuladas.length) {
+          await informar({ titulo: data.anuladas.length === 1 ? "Retirá esta etiqueta" : "Retirá estas etiquetas", texto: [
+            `Estas cajas ya no figuran en ${corto}: sacales la etiqueta (o la caja, si no existe).`,
+            data.anuladas.join(", "),
+            data.cajas.length ? "Las que reemplazan a estas tienen etiqueta nueva." : ""].filter(Boolean) });
+        }
+        const etiquetas = data.cajas.length ? await etiquetasDe(data.cajas, p) : "";
+        const cambio = data.unidades - data.antes;
+        await despuesDeEditar(p, `${p.itemName}: conteo editado, ${unidadesTexto(data.unidades)} en ${corto}`
+          + `${cambio ? ` (${cambio > 0 ? "+" : ""}${numero(cambio)})` : ""}.${etiquetas}`);
+      } catch (error) {
+        guardar.disabled = false;
+        if (error.status === 401) return mostrarError(error);
+        mostrarProblema(textoFalla(error));
+      }
+    }
     poner(panel, cabeza(p),
       h("form", { class: "formulario-recepcion formulario-conteo", onsubmit: (evento) => enviar(evento), oninput: pintarFormulario, onchange: pintarFormulario },
+        edicion && aviso("info", "Editando el conteo guardado: dejá todo como está realmente en la bodega. Las cajas que no cambian conservan su etiqueta."),
         h("h3", {}, grande ? "¿Cuántas cajas hay de cada lote?" : "¿Cuántas unidades hay de cada lote?"),
         campos.elemento, total, problema,
         h("div", { class: "fila" }, guardar,
-          boton("", null, "No hay", { onclick: () => noHay(p), "aria-label": `No hay ${p.itemName} en ${corto}` }),
-          boton("", null, "Cancelar", { onclick: () => panelVacio() }))));
+          !edicion && boton("", null, "No hay", { onclick: () => noHay(p), "aria-label": `No hay ${p.itemName} en ${corto}` }),
+          boton("", null, "Cancelar", { onclick: () => (edicion ? yaContado(p) : panelVacio()) }))));
     pintarFormulario();
     campos.enfocar();
   }
@@ -2982,7 +3037,7 @@ async function vistaConteo({ bodega = null, itemCode = null } = {}) {
       h("section", { class: "conteo__columna", "aria-label": "Productos de la bodega" }, pestanas, filasLista, pie)));
   pintar(primera);
   pintarCola();
-  if (itemCode) abrir(itemCode);
+  if (itemCode) abrir(itemCode, { editarlo: editarAlAbrir });
   else { panelVacio(); lector.entrada.focus(); }
 }
 
