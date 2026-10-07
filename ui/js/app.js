@@ -1629,8 +1629,14 @@ function contarPequena(p, { alTerminar = (texto) => vistaProducto(p.itemCode, { 
       placeholder: lote ? `sistema: ${numero(lote.unidades)}` : "0" });
     const fila = { lote, unidades };
     if (lote) {
-      lista.append(h("li", {}, h("label", { for: `${id}-u` }, h("strong", {}, lote.lote ? `Lote ${lote.lote}` : "Sin lote"),
-        h("span", { class: "suave" }, textoVencimiento(lote.vencimiento))), unidades));
+      // La fecha se puede corregir; si no se cambia el mes, vuelve la fecha guardada tal cual.
+      fila.vence = h("input", { id: `${id}-v`, class: "campo", type: "month" });
+      ponerMes(fila.vence, lote.vencimiento ? String(lote.vencimiento).slice(0, 10) : null);
+      lista.append(h("li", { class: "conteo-lotes__nuevo" },
+        h("div", { class: "conteo-lotes__nombre" }, h("strong", {}, lote.lote ? `Lote ${lote.lote}` : "Sin lote"),
+          h("span", { class: "suave" }, `Sistema: ${unidadesTexto(lote.unidades)}`)),
+        h("label", { for: `${id}-v` }, h("span", {}, "Vence"), fila.vence),
+        h("label", { for: `${id}-u` }, h("span", {}, "Unidades"), unidades)));
     } else {
       fila.nombre = h("input", { id: `${id}-l`, class: "campo codigo", maxlength: "60", autocomplete: "off", spellcheck: "false", placeholder: "Sin lote" });
       fila.vence = h("input", { id: `${id}-v`, class: "campo", type: "month" });
@@ -1646,9 +1652,12 @@ function contarPequena(p, { alTerminar = (texto) => vistaProducto(p.itemCode, { 
   function leer() {
     const vacios = filas.some((f) => f.unidades.value === "" && (f.lote || f.nombre.value.trim()));
     if (vacios) return { problema: "Escribí cuántas unidades hay de cada lote (0 si no hay ninguna)." };
-    return armarConteo(filas.filter((f) => f.unidades.value !== "").map((f) => ({
+    // Las filas en 0 no se mandan: el conteo reemplaza todo lo que había en la 02.
+    const conUnidades = filas.filter((f) => f.unidades.value !== "" && Number(f.unidades.value) !== 0);
+    if (conUnidades.some((f) => f.vence.value && !finDeMes(f.vence.value))) return { problema: "Un vencimiento no es válido: el año va completo, por ejemplo 2028." };
+    return armarConteo(conUnidades.map((f) => ({
       lote: f.lote ? f.lote.lote ?? null : f.nombre.value.trim() || null,
-      vencimiento: f.lote ? (f.lote.vencimiento ? String(f.lote.vencimiento).slice(0, 10) : null) : (f.vence.value ? finDeMes(f.vence.value) : null),
+      vencimiento: f.vence.value ? mesGuardado(f.vence) : null,
       unidades: Number(f.unidades.value) })));
   }
   function pintar() {

@@ -930,8 +930,10 @@ h2 {
 .despacho-lotes li:focus-within, .conteo-lotes li:focus-within { border-color: var(--accion); box-shadow: 0 0 0 3px var(--lila); }
 .despacho-lotes li > label, .conteo-lotes li > label { display: grid; gap: 4px; }
 .despacho-lotes .campo--numero, .conteo-lotes .campo--numero { max-width: none; }
-.conteo-lotes li.conteo-lotes__nuevo { grid-template-columns: minmax(0, 1fr) 150px 150px; align-items: end; }
+.conteo-lotes li.conteo-lotes__nuevo { grid-template-columns: minmax(0, 1fr) 228px 100px; align-items: end; }
+.conteo-lotes__nuevo .campo { width: 100%; min-width: 0; }
 .conteo-lotes__nuevo label > span { font-size: 14px; font-weight: 700; }
+.conteo-lotes__nombre { display: grid; gap: 2px; align-self: center; min-width: 0; overflow-wrap: anywhere; }
 .conteo__total { margin: 12px 0 0; font-size: 18px; font-weight: 700; font-variant-numeric: tabular-nums; }
 
 /* ---------- Registrar un código ---------- */
