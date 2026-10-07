@@ -2955,7 +2955,7 @@ async function vistaConteo({ bodega = null, itemCode = null, editar: editarAlAbr
         if (error.status === 401) return mostrarError(error);
         if (error.codigo === "EXCEDE_POR_UBICAR" && !adelantar) {
           const seguir = await confirmar({ titulo: "Contaste más de lo que SAP tiene", aceptar: "Guardar igual",
-            texto: [`Contaste ${textoContado(r)}${sap !== null ? ` y SAP tiene ${numero(sap)} en ${corto}` : ""}.`,
+            texto: [error.mensaje,
               "Si contaste bien, guardalo igual: la diferencia queda anotada para revisarla con SAP."] });
           return seguir ? enviar(null, true) : undefined;
         }
