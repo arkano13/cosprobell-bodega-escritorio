@@ -974,3 +974,6 @@ h2 {
 .boton.lote-caja { justify-content: space-between; gap: 16px; min-height: 64px; font-size: 19px; text-align: left; }
 .lote-caja > span:first-child { flex: 1; }
 .lote-caja__nota { flex: none; font-size: 15px; font-weight: 600; }
+.traspaso-paso { margin-bottom: 16px; }
+.traspaso-paso h2 { margin: 0 0 12px; font-size: 22px; }
+.traspaso-paso .lotes-caja { margin-top: 0; }

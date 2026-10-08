@@ -2015,9 +2015,9 @@ function vistaReponer() {
   lector.entrada.focus();
 }
 
-// Aceptar un traspaso de la grande a la pequeña que SAP ya registró. SAP solo dice cuántas unidades pasaron. Se escanea
-// el código de barras de cada caja que se pasa (el de la caja del proveedor) y se elige el lote que dice la caja; la app
-// recomienda el que vence primero y avisa si se elige uno que vence después. Solo cajas enteras. El supervisor puede
+// Aceptar un traspaso de la grande a la pequeña que SAP ya registró. SAP solo dice cuántas unidades pasaron. Se elige el
+// lote y vencimiento que dicen las cajas (viene marcado el que vence primero; si se elige uno que vence después, avisa)
+// y se escanea el código de barras de cada caja (el de la caja del proveedor, igual en todas). Solo cajas enteras. El supervisor puede
 // aceptar sin escanear: la sugerencia por lote o eligiendo otros lotes. Al aceptar se restan de las cajas de la grande y
 // se suman a la pequeña con su lote y vencimiento.
 async function vistaTraspaso(itemCode, { desde = "pendientes" } = {}) {
@@ -2112,58 +2112,81 @@ async function vistaTraspaso(itemCode, { desde = "pendientes" } = {}) {
     campos[0]?.focus();
   }
 
-  // Escaneando: una caja entera por lectura, con el lote que dice la caja.
+  // Escaneando: primero el lote y la fecha que dicen las cajas (el que vence primero viene marcado) y después se escanea
+  // cada caja. Varias cajas tienen el mismo código: cada lectura suma una caja entera del lote elegido.
   const textoSugerencia = (lotes) => lotes.map((l) => `${l.cajas} ${l.cajas === 1 ? "caja" : "cajas"} del lote ${l.lote ?? "sin lote"} (vence ${textoVencimiento(l.vencimiento)})`).join(" y ");
+  const mismoLote = (x, y) => Boolean(x && y) && (x.lote ?? null) === (y.lote ?? null) && (x.vencimiento ?? null) === (y.vencimiento ?? null);
+  let loteElegido = lotesParaEscanear(cajas, [])[0] ?? null;
   function pintarEscaneo() {
     const elegidas = cajasEscaneadas(cajas, escaneadas);
     const suma = elegidas.reduce((t, c) => t + (c?.unidades ?? 0), 0);
     const listo = suma === total;
-    const lector = campoLector({ etiqueta: "Caja", placeholder: "Escaneá el código de barras de la caja", alLeer: leerCaja });
+    const lotes = lotesParaEscanear(cajas, escaneadas);
+    if (!lotes.some((l) => mismoLote(l, loteElegido))) loteElegido = null;
+    const lector = campoLector({ etiqueta: "Cajas", alLeer: leerCaja,
+      placeholder: loteElegido ? `Escaneá cada caja del lote ${loteElegido.lote ?? "sin lote"}` : "Primero elegí el lote" });
     const aceptarBoton = boton("boton--principal boton--grande", "completa", `Aceptar traspaso (${unidadesTexto(total)})`,
       { disabled: !listo, onclick: () => aceptar({ cajas: escaneadas }, aceptarBoton) });
+    const opcionLote = (l, i) => h("button", { class: `boton lote-caja${mismoLote(l, loteElegido) ? " boton--principal" : ""}`, type: "button",
+      "aria-pressed": mismoLote(l, loteElegido) ? "true" : "false", onclick: () => elegirLote(l, lotes[0]) },
+      h("span", {}, loteTexto(l)),
+      h("span", { class: "lote-caja__nota" }, `${i === 0 ? "Recomendado · " : venceDespues(l, lotes[0]) ? "Vence después · " : ""}${l.cajas} ${l.cajas === 1 ? "caja" : "cajas"} de ${numero(l.unidades)}`));
     poner(cuerpo,
       aviso("info", p.traspaso.sugerencia
-        ? `SAP pasó ${unidadesTexto(total)} de ${de} a ${a}. Pasá ${textoSugerencia(p.traspaso.sugerencia)}: vencen primero. Escaneá el código de barras de cada caja.`
+        ? `SAP pasó ${unidadesTexto(total)} de ${de} a ${a}. Pasá ${textoSugerencia(p.traspaso.sugerencia)}: vencen primero.`
         : `SAP pasó ${unidadesTexto(total)} de ${de} a ${a}, pero en ${de} hay menos registrado: avisale al supervisor.`),
       h("p", { class: "traspaso-avance" }, `${escaneadas.length} ${escaneadas.length === 1 ? "caja" : "cajas"} · ${numero(suma)} de ${unidadesTexto(total)}`),
       escaneadas.length > 0 && h("ul", { class: "traspaso-cajas" }, elegidas.map((c, i) => h("li", {}, icono("completa"),
         h("span", {}, h("strong", {}, `Caja ${i + 1}`), h("span", { class: "suave" }, `${loteTexto(c)} · ${unidadesTexto(c.unidades)}`))))),
       problema,
-      !listo && !p.codigosCaja?.length && aviso("alerta", `Este producto no tiene registrado el código de barras de la caja: la primera vez que lo escanees te pregunta si es de ${p.itemName}.`),
-      listo ? aviso("ok", `Listo: ${numero(suma)} unidades, lo que pasó SAP.`) : lector.seccion,
+      listo ? aviso("ok", `Listo: ${numero(suma)} unidades, lo que pasó SAP.`) : [
+        h("section", { class: "tarjeta traspaso-paso", "aria-labelledby": "traspaso-paso-1" },
+          h("h2", { id: "traspaso-paso-1" }, "1. ¿Qué lote y vencimiento dicen las cajas?"),
+          lotes.length ? h("div", { class: "lotes-caja" }, lotes.map(opcionLote),
+            boton("", null, "Otro lote o fecha…", { onclick: () => mostrarProblema(`Ese lote no está registrado en ${de}: avisale al supervisor (puede editar el conteo de ${de}).`) }))
+            : aviso("alerta", `No quedan cajas de este producto en ${de}. Avisale al supervisor.`)),
+        h("section", { class: "traspaso-paso", "aria-labelledby": "traspaso-paso-2" },
+          h("h2", { id: "traspaso-paso-2" }, loteElegido ? `2. Escaneá cada caja del lote ${loteElegido.lote ?? "sin lote"} (vence ${textoVencimiento(loteElegido.vencimiento)})` : "2. Escaneá cada caja"),
+          !p.codigosCaja?.length && aviso("alerta", `Este producto no tiene registrado el código de barras de la caja: la primera vez que lo escanees te pregunta si es de ${p.itemName}.`),
+          lector.seccion)],
       h("div", { class: "fila" }, aceptarBoton,
         escaneadas.length > 0 && boton("", "borrar", "Quitar la última caja", { onclick: () => { escaneadas = escaneadas.slice(0, -1); problema.hidden = true; pintar(); } }),
         esSupervisor() && boton("", "lista", "Aceptar sin escanear", { onclick: () => { modo = "lotes"; problema.hidden = true; pintar(); } })));
     if (listo) aceptarBoton.focus(); else lector.entrada.focus();
 
+    async function elegirLote(l, recomendado) {
+      problema.hidden = true;
+      if (mismoLote(l, loteElegido)) return lector.entrada.focus();
+      if (venceDespues(l, recomendado) && !(await confirmar({ titulo: "Ese lote vence después", aceptar: "Usar este lote", texto: [
+        `El recomendado es el lote ${recomendado.lote ?? "sin lote"}, que vence ${textoVencimiento(recomendado.vencimiento)}: conviene pasar primero lo que vence antes.`,
+        `¿Pasás cajas del lote ${l.lote ?? "sin lote"} (vence ${textoVencimiento(l.vencimiento)})?`] }))) return pintar();
+      loteElegido = { lote: l.lote, vencimiento: l.vencimiento };
+      pintar();
+    }
     async function leerCaja(codigo) {
       problema.hidden = true;
       if (p.codigos.some((c) => c.codigo === codigo)) return mostrarProblema("Ese es el código de la unidad. Escaneá el código de barras de la caja.");
+      if (!loteElegido) return mostrarProblema("Primero elegí el lote y el vencimiento que dicen las cajas.");
       if (!p.codigosCaja?.some((c) => c.codigo === codigo)) {
         const ok = await confirmar({ titulo: "¿Es la caja de este producto?", aceptar: "Sí, registrarlo", texto: [
           `El código ${codigo} no está registrado como caja.`, `Si es la caja de ${p.itemName}, queda registrado y la próxima vez se reconoce solo.`] });
-        if (!ok) return lector.entrada.focus();
+        if (!ok) return pintar();
         try {
           const { data } = await api.registrarCodigoCaja(codigo, p.itemCode);
           p.codigosCaja = [...(p.codigosCaja ?? []), { id: data.id, codigo: data.codigo }];
         } catch (error) {
           if (error.status === 401) return mostrarError(error);
+          pintar();
           return mostrarProblema(textoFalla(error));
         }
       }
-      const lotes = lotesParaEscanear(cajas, escaneadas);
-      if (!lotes.length) return mostrarProblema(`No quedan cajas de este producto en ${de}. Avisale al supervisor.`);
-      const elegido = await preguntarLote(lotes);
-      if (!elegido) return pintar();
-      if (elegido === "otro") {
+      const nuevas = [...escaneadas, { lote: loteElegido.lote, vencimiento: loteElegido.vencimiento }];
+      const elegidasNuevas = cajasEscaneadas(cajas, nuevas);
+      if (!elegidasNuevas.at(-1)) {
         pintar();
-        return mostrarProblema(`Ese lote no está registrado en ${de}: avisale al supervisor (puede editar el conteo de ${de}).`);
+        return mostrarProblema(`No quedan más cajas del lote ${loteElegido.lote ?? "sin lote"} en ${de}. Elegí otro lote o avisale al supervisor.`);
       }
-      if (venceDespues(elegido, lotes[0]) && !(await confirmar({ titulo: "Esta caja vence después", aceptar: "Pasarla igual", texto: [
-        `La recomendada es del lote ${lotes[0].lote ?? "sin lote"}, que vence ${textoVencimiento(lotes[0].vencimiento)}: conviene pasar primero la que vence antes.`,
-        `¿Pasás igual la del lote ${elegido.lote ?? "sin lote"} (vence ${textoVencimiento(elegido.vencimiento)})?`] }))) return pintar();
-      const nuevas = [...escaneadas, { lote: elegido.lote, vencimiento: elegido.vencimiento }];
-      const unidades = cajasEscaneadas(cajas, nuevas).reduce((t, c) => t + (c?.unidades ?? 0), 0);
+      const unidades = elegidasNuevas.reduce((t, c) => t + (c?.unidades ?? 0), 0);
       if (unidades > total) {
         pintar();
         return mostrarProblema(`Con esta caja serían ${numero(unidades)} unidades y SAP pasó ${numero(total)}. Solo se pasan cajas enteras: avisale al supervisor.`);
@@ -2171,25 +2194,6 @@ async function vistaTraspaso(itemCode, { desde = "pendientes" } = {}) {
       escaneadas = nuevas;
       pintar();
     }
-  }
-  // Después de escanear: el lote que dice la caja. El que vence primero va adelante (recomendado).
-  function preguntarLote(lotes) {
-    return new Promise((resolver) => {
-      let hecho = false;
-      // Se resuelve cuando el diálogo ya cerró: si no, su aviso de cierre le llega al siguiente diálogo (el de "vence después").
-      const fin = (valor) => { hecho = true; dialogo.onclose = () => resolver(valor); dialogo.close(); };
-      dialogo.replaceChildren(
-        h("div", { class: "dialogo__cuerpo" }, h("h2", {}, "¿Qué lote dice la caja?"),
-          h("p", {}, "Mirá el lote y la fecha impresos en la caja y tocá el que coincide."),
-          h("div", { class: "lotes-caja" }, lotes.map((l, i) => h("button", { class: `boton lote-caja${i === 0 ? " boton--principal" : ""}`, type: "button", onclick: () => fin(l) },
-            h("span", {}, loteTexto(l)),
-            h("span", { class: "lote-caja__nota" }, i === 0 ? "Recomendado" : venceDespues(l, lotes[0]) ? "Vence después" : `${l.cajas} ${l.cajas === 1 ? "caja" : "cajas"}`))),
-          h("button", { class: "boton", type: "button", onclick: () => fin("otro") }, "Otro lote o fecha…"))),
-        h("div", { class: "dialogo__acciones" }, h("button", { class: "boton", type: "button", onclick: () => fin(null) }, "Cancelar")));
-      dialogo.onclose = () => { if (!hecho) resolver(null); };
-      dialogo.showModal();
-      dialogo.querySelector(".lote-caja")?.focus();
-    });
   }
 
   const pintar = () => {
