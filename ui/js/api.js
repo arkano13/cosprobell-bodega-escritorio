@@ -77,6 +77,8 @@ export function crearApi({ token, base = "", fetchImpl = (...args) => globalThis
     // Registrar un código de barras que SAP no tiene: cualquiera que cuente (operador o supervisor). Quitarlo, solo el supervisor.
     registrarCodigo: (codigo, itemCode) => pedir("POST", "/inventario/codigos", { codigo, itemCode }),
     quitarCodigo: (id) => pedir("DELETE", `/supervisor/codigos/${id}`),
+    registrarCodigoCaja: (codigo, itemCode) => pedir("POST", "/inventario/codigos-caja", { codigo, itemCode }),
+    quitarCodigoCaja: (id) => pedir("DELETE", `/supervisor/codigos-caja/${id}`),
     // Inventario de las dos bodegas.
     inventario: () => pedir("GET", "/inventario/resumen"),
     buscarProductos: (buscar) => pedir("GET", `/inventario/productos?${new URLSearchParams({ buscar, limit: "20" })}`),

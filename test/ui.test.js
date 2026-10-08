@@ -186,7 +186,7 @@ test("supervisor: textos de revisiones", () => {
 
 import { PATRONES, simbolos, anchos, barras, MARGEN } from "../ui/js/code128.js";
 import { ESTADOS, armarAsignaciones, armarConteo, armarGrupos, armarLotesDespacho, cantidadMovimiento, diasParaVencer, esCodigoCaja, estadoFila,
-  filtrosBodega, filtrosExistencias, finDeMes, nombreOpcion, textoLoteBodega,
+  filtrosBodega, filtrosExistencias, finDeMes, nombreOpcion, textoLoteBodega, cajasDeLaGrande, cajasEscaneadas, lotesParaEscanear, venceDespues,
   opcionesDescuento, quien, resumenRecepcion, revisarDespacho, sugerirAsignacion, textoAsignacion, textoDocumento, textoEstado, textoMovimiento,
   textoPorVencer, textoVencimiento, unidadesPorProducto, nombreBodega, haceTiempo, estadoSap, avanceConteo, pasosPuestaEnMarcha, armarLotesPequena,
   armarConteoCajas, conteoGuardadoGrande, cuerpoEdicionGrande, textoContado, filasTraspaso, resumenTraspaso, pareceCodigoBarras } from "../ui/js/inventario.js";
@@ -552,4 +552,20 @@ test("editar el conteo de la grande: lo guardado vuelve al formulario por lote, 
   assert.deepEqual(cuerpoEdicionGrande({ modo: "grupos", grupos: [{ cajas: 1 }], bulto: null }), { grupos: [{ cajas: 1 }], bulto: null });
   assert.deepEqual(cuerpoEdicionGrande({ modo: "suelto", destino: "grande", unidades: 6, lote: "L2", vencimiento: null }),
     { grupos: [], bulto: { unidades: 6, lote: "L2", vencimiento: null } });
+});
+
+test("traspaso escaneando: cada caja es una entera del lote y fecha que dice; el que vence primero va adelante", () => {
+  const lotes = [
+    { lote: "L2", vencimiento: "2027-06-30", cajas: [{ id: 1, unidades: 24, unidadesIniciales: 24 }, { id: 5, unidades: 24, unidadesIniciales: 24 }] },
+    { lote: "L1", vencimiento: "2027-01-31", cajas: [{ id: 2, unidades: 10, unidadesIniciales: 24 }, { id: 3, unidades: 24, unidadesIniciales: 24 }, { id: 4, unidades: 0, unidadesIniciales: 24 }] },
+  ];
+  const cajas = cajasDeLaGrande(lotes);
+  assert.deepEqual(cajas.map((c) => c.id), [1, 3, 5, 2], "sin las vacías; primero las enteras, después la más antigua");
+  const L1 = { lote: "L1", vencimiento: "2027-01-31" }, L2 = { lote: "L2", vencimiento: "2027-06-30" };
+  assert.deepEqual(cajasEscaneadas(cajas, [L1, L1, L1]).map((c) => c?.id ?? null), [3, 2, null]);
+  assert.deepEqual(lotesParaEscanear(cajas, []).map((l) => [l.lote, l.cajas]), [["L1", 2], ["L2", 2]]);
+  assert.deepEqual(lotesParaEscanear(cajas, [L1, L1]).map((l) => [l.lote, l.cajas]), [["L2", 2]]);
+  assert.equal(venceDespues(L2, L1), true);
+  assert.equal(venceDespues(L1, L1), false);
+  assert.equal(venceDespues({ lote: "X", vencimiento: null }, L1), true, "sin vencimiento cuenta como después");
 });

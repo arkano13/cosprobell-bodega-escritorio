@@ -206,6 +206,42 @@ export function textoContado({ total, cajas = 0, etiquetas = 0 }) {
 // lote de la grande, con lo que tiene y lo sugerido, del que vence primero al último. lotes: los de la ficha
 // ([{ lote, vencimiento, unidades }]); sugerencia: [{ lote, unidades }] o null.
 const venceEn = (l) => (l.vencimiento ? Date.parse(String(l.vencimiento).slice(0, 10)) : Infinity);
+// Traspaso escaneando cajas: cada caja escaneada es una caja entera de la 01 del lote y vencimiento que dice. Igual que el
+// servidor (elegirCajas): por cada una, la primera caja libre de ese lote y fecha, primero las enteras y después la más
+// antigua. lotes: los de la ficha ({ lote, vencimiento, cajas: [{ id, unidades, unidadesIniciales }] }).
+const diaDe = (v) => (v ? String(v).slice(0, 10) : null);
+export function cajasDeLaGrande(lotes) {
+  return (lotes ?? []).flatMap((l) => l.cajas.filter((c) => c.unidades > 0).map((c) => ({ ...c, lote: l.lote ?? null, vencimiento: diaDe(l.vencimiento) })))
+    .sort((a, b) => Number(b.unidades === b.unidadesIniciales) - Number(a.unidades === a.unidadesIniciales) || a.id - b.id);
+}
+export function cajasEscaneadas(cajas, escaneadas) {
+  const usadas = new Set();
+  return escaneadas.map((e) => {
+    const caja = cajas.find((c) => !usadas.has(c.id) && c.lote === (e.lote ?? null) && c.vencimiento === diaDe(e.vencimiento));
+    if (caja) usadas.add(caja.id);
+    return caja ?? null;
+  });
+}
+// Los lotes que todavía tienen una caja libre, el que vence primero adelante (el recomendado), con cuántas cajas quedan.
+export function lotesParaEscanear(cajas, escaneadas) {
+  const usadas = new Set(cajasEscaneadas(cajas, escaneadas).filter(Boolean).map((c) => c.id));
+  const lotes = new Map();
+  for (const c of cajas) {
+    if (usadas.has(c.id)) continue;
+    const clave = JSON.stringify([c.lote, c.vencimiento]);
+    if (!lotes.has(clave)) lotes.set(clave, { lote: c.lote, vencimiento: c.vencimiento, cajas: 0, unidades: c.unidades });
+    lotes.get(clave).cajas += 1;
+  }
+  const vence = (l) => (l.vencimiento ? Date.parse(l.vencimiento) : Infinity);
+  return [...lotes.values()].sort((a, b) => vence(a) - vence(b));
+}
+// ¿Esta caja vence después que la recomendada? (para avisar antes de pasarla)
+export function venceDespues(elegido, recomendado) {
+  if (!recomendado) return false;
+  const vence = (l) => (l.vencimiento ? Date.parse(l.vencimiento) : Infinity);
+  return vence(elegido) > vence(recomendado);
+}
+
 export function filasTraspaso(lotes, sugerencia = null) {
   const porLote = new Map();
   for (const l of lotes) {
