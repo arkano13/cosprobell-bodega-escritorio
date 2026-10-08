@@ -2843,6 +2843,7 @@ async function vistaConteo({ bodega = null, itemCode = null, editar: editarAlAbr
   const avance = h("div", { class: "conteo__avance" });
   const mensaje = h("div", { class: "conteo__mensaje", "aria-live": "polite" });
   const panel = h("section", { class: "tarjeta conteo__panel", "aria-label": "Producto que se está contando" });
+  let enPantallaAncha = () => false;
   const pestanas = h("nav", { class: "pestanas conteo__pestanas", "aria-label": "Qué mostrar" });
   const filasLista = h("ul", { class: "conteo__lista" });
   const pie = h("div", { class: "fila fila--entre conteo__pie" });
@@ -3033,6 +3034,7 @@ async function vistaConteo({ bodega = null, itemCode = null, editar: editarAlAbr
     if (esta !== vezPanel) return;
     actual = p; repintar = null;
     marcarActual();
+    if (enPantallaAncha()) window.scrollTo({ top: document.documentElement.scrollHeight });
     if (p.contadoEn?.[bodega]) return editarlo && esSupervisor() ? editar(p) : yaContado(p);
     formulario(p);
   }
@@ -3192,6 +3194,22 @@ async function vistaConteo({ bodega = null, itemCode = null, editar: editarAlAbr
     lector.seccion, mensaje,
     h("div", { class: "conteo-layout" }, panel,
       h("section", { class: "conteo__columna", "aria-label": "Productos de la bodega" }, pestanas, filasLista, pie)));
+  // En la PC las dos columnas ocupan lo que queda de la pantalla y cada una tiene su propia barra: el formulario se baja
+  // sin mover la lista ni la página, y el lector queda siempre a la vista.
+  // El alto es lo que queda debajo del lector cuando queda fijo arriba; al abrir un producto la página sube hasta ahí.
+  const layout = panel.parentElement;
+  const medirAlto = () => {
+    const fijo = parseFloat(getComputedStyle(lector.seccion).top) || 0;
+    const abajo = parseFloat(getComputedStyle(layout.parentElement).paddingBottom) || 0;
+    // 32: el margen debajo del lector y un poco de aire.
+    layout.style.setProperty("--alto-conteo", `${Math.max(420, window.innerHeight - fijo - lector.seccion.offsetHeight - abajo - 32)}px`);
+  };
+  enPantallaAncha = () => window.matchMedia("(min-width: 1100px)").matches;
+  const observador = new ResizeObserver(medirAlto);
+  for (const e of [lector.seccion, mensaje, layout.previousElementSibling]) if (e) observador.observe(e);
+  escuchar(window, "resize", medirAlto);
+  limpiezas.push(() => observador.disconnect());
+  medirAlto();
   pintar(primera);
   pintarCola();
   if (itemCode) abrir(itemCode, { editarlo: editarAlAbrir });
