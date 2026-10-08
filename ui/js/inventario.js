@@ -275,17 +275,19 @@ export function resumenTraspaso(elegidos, total) {
 // Cajas por grupos (cada grupo con su lote) y lo que sobra como un bulto en la grande. filas: [{ cajas,
 // unidadesPorCaja, lote, vencimiento }], bulto: { unidades, lote, vencimiento } o null. Devuelve el cuerpo con sus
 // totales ({ grupos, bulto, cajas, total, etiquetas }) o { problema }.
+// Hasta 2000 cajas por fila (un lote) y 3000 por vez: lo mismo que acepta el servidor.
+const MAX_CAJAS_FILA = 2000, MAX_CAJAS = 3000;
 export function armarGrupos(filas, bulto = null) {
   const grupos = [];
   for (const [i, f] of filas.entries()) {
     const cual = filas.length > 1 ? ` (fila ${i + 1})` : "";
-    if (!Number.isInteger(f.cajas) || f.cajas < 1 || f.cajas > 200) return { problema: `Escribí la cantidad de cajas, de 1 a 200${cual}.` };
+    if (!Number.isInteger(f.cajas) || f.cajas < 1 || f.cajas > MAX_CAJAS_FILA) return { problema: `Escribí la cantidad de cajas, de 1 a ${MAX_CAJAS_FILA}${cual}.` };
     if (!Number.isInteger(f.unidadesPorCaja) || f.unidadesPorCaja < 1) return { problema: `Escribí cuántas unidades trae cada caja${cual}.` };
     grupos.push({ cajas: f.cajas, unidadesPorCaja: f.unidadesPorCaja, lote: f.lote || null, vencimiento: f.vencimiento ?? null });
   }
   if (!grupos.length) return { problema: "Agregá al menos una fila de cajas." };
   const cajas = grupos.reduce((t, g) => t + g.cajas, 0);
-  if (cajas > 500) return { problema: "Hasta 500 cajas por vez." };
+  if (cajas > MAX_CAJAS) return { problema: `Hasta ${MAX_CAJAS} cajas por vez.` };
   if (bulto && (!Number.isInteger(bulto.unidades) || bulto.unidades < 1)) return { problema: "Escribí cuántas unidades sueltas sobraron, o dejalo vacío." };
   const enCajas = grupos.reduce((t, g) => t + g.cajas * g.unidadesPorCaja, 0);
   return { grupos, bulto: bulto ? { unidades: bulto.unidades, lote: bulto.lote || null, vencimiento: bulto.vencimiento ?? null } : null,

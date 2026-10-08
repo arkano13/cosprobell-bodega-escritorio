@@ -397,11 +397,14 @@ test("inventario: recibir o contar cajas por lote, con el bulto de lo que sobra"
   assert.deepEqual(r, { grupos: [{ cajas: 3, unidadesPorCaja: 20, lote: "L1", vencimiento: "2027-01-31" }, { cajas: 2, unidadesPorCaja: 24, lote: null, vencimiento: null }],
     bulto: { unidades: 7, lote: null, vencimiento: null }, cajas: 5, enCajas: 108, total: 115, etiquetas: 6 });
   assert.equal(armarGrupos(filas).etiquetas, 5);
-  assert.match(armarGrupos([...filas, { cajas: 0, unidadesPorCaja: 10 }]).problema, /cantidad de cajas, de 1 a 200 \(fila 3\)/);
+  assert.match(armarGrupos([...filas, { cajas: 0, unidadesPorCaja: 10 }]).problema, /cantidad de cajas, de 1 a 2000 \(fila 3\)/);
   assert.match(armarGrupos([{ cajas: 2, unidadesPorCaja: NaN }]).problema, /cuántas unidades trae cada caja\.$/);
   assert.match(armarGrupos(filas, { unidades: 0 }).problema, /sueltas sobraron/);
   assert.match(armarGrupos([]).problema, /al menos una fila/);
-  assert.match(armarGrupos([{ cajas: 200, unidadesPorCaja: 1 }, { cajas: 200, unidadesPorCaja: 1 }, { cajas: 101, unidadesPorCaja: 1 }]).problema, /500 cajas/);
+  assert.match(armarGrupos([{ cajas: 2000, unidadesPorCaja: 1 }, { cajas: 1001, unidadesPorCaja: 1 }]).problema, /Hasta 3000 cajas por vez/);
+  // Un lote de 265 cajas entra en una sola fila.
+  assert.equal(armarGrupos([{ cajas: 265, unidadesPorCaja: 6, lote: "13662" }]).problema, undefined);
+  assert.match(armarGrupos([{ cajas: 2001, unidadesPorCaja: 1 }]).problema, /de 1 a 2000/);
   // El resumen de una sola fila sin bulto queda como antes; con varios lotes, los cuenta.
   assert.deepEqual(resumenRecepcion({ modo: "grupos", grupos: [{ cajas: 4, unidadesPorCaja: 20, lote: "L2408-090" }] }),
     { total: 80, texto: "Entran 4 cajas · 80 unidades del lote L2408-090 a la grande." });
