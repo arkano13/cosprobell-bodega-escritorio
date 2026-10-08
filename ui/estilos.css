@@ -832,7 +832,10 @@ h2 {
 @media (min-width: 1100px) {
   /* PC: el producto que se cuenta a la izquierda y la lista a la derecha. */
   .conteo-layout { grid-template-columns: minmax(0, 1.25fr) minmax(360px, 1fr); }
-  .conteo__panel { position: sticky; top: calc(var(--alto-barra) + 16px); }
+  /* Las dos columnas ocupan lo que queda de la pantalla y cada una se baja con su propia barra. */
+  .conteo-layout { height: var(--alto-conteo, auto); align-items: start; }
+  .conteo__panel, .conteo__columna { max-height: 100%; overflow-y: auto; overscroll-behavior: contain; scrollbar-gutter: stable; }
+  .conteo__columna { padding-right: 4px; }
 }
 
 /* ---------- Traspaso de SAP a la 02: de qué lotes salió ---------- */
