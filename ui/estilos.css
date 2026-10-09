@@ -945,6 +945,17 @@ h2 {
 .dif--total.dif--menos { background: var(--error-fondo); }
 .dif--total.dif--mas { background: var(--alerta-fondo); }
 .hoja-reporte__portada { display: none; }
+.solo-conteo { display: grid; gap: 12px; margin: 0 0 12px; }
+.solo-conteo__fila { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) auto; align-items: end; }
+.solo-conteo__fila .solo-conteo__quitar { align-self: end; }
+@media (max-width: 700px) { .solo-conteo__fila { grid-template-columns: 1fr; } }
+.reporte-almacen { margin: 30px 0 26px; padding-top: 22px; border-top: 2px solid var(--linea); }
+.reporte-almacen h3 { margin: 0 0 4px; font-family: var(--letra-titulo); font-size: 26px; font-weight: 800; text-transform: uppercase; }
+.reporte-almacen h4 { margin: 18px 0 8px; font-family: var(--letra-titulo); font-size: 19px; font-weight: 700; }
+.reporte-almacen > p { margin: 0 0 8px; }
+.reporte-almacen__cifras { font-size: 17px; }
+.reporte-almacen__ok { color: var(--ok-texto); }
+.tabla-cuadre--almacen tbody th { min-width: 260px; }
 @media (max-width: 1000px) { .reporte-cifras { grid-template-columns: 1fr; } }
 
 @media print {
@@ -981,6 +992,12 @@ h2 {
   .hoja-reporte .tabla-cuadre .dif--total { font-size: 9.4pt; font-weight: 800; }
   .hoja-reporte .tabla-cuadre tbody tr > .dif--total.dif--menos { background: var(--error-fondo); }
   .hoja-reporte .tabla-cuadre tbody tr > .dif--total.dif--mas { background: var(--alerta-fondo); }
+  .hoja-reporte .reporte-almacen { margin: 0; padding: 0; border: 0; break-before: page; }
+  .hoja-reporte .reporte-almacen h3 { font-size: 18pt; }
+  .hoja-reporte .reporte-almacen h4 { margin: 4mm 0 2mm; font-size: 12pt; break-after: avoid; }
+  .hoja-reporte .reporte-almacen > p { font-size: 9.5pt; }
+  .hoja-reporte .reporte-almacen__cifras { font-size: 10.5pt; }
+  .hoja-reporte .tabla-cuadre--almacen tbody th { width: 50%; }
 }
 
 /* ---------- Descuentos ---------- */

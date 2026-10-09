@@ -72,7 +72,8 @@ export function crearApi({ token, base = "", fetchImpl = (...args) => globalThis
     sincronizacion: () => pedir("GET", "/supervisor/sincronizacion"),
     reporteCuadre: () => pedir("GET", "/supervisor/reportes/cuadre"),
     almacenes: () => pedir("GET", "/supervisor/almacenes"),
-    // porBodega: { almacenGrande, almacenPequena }, qué almacén marcado es cada bodega (null: sin asignar).
+    // porBodega: { almacenGrande, almacenPequena }, qué almacén marcado es cada bodega (null: sin asignar), y soloConteo:
+    // [{ almacen, tipo: "cajas" | "sueltas" }], los que solo se cuentan (sin enviar, quedan como estaban).
     elegirAlmacenes: (almacenes, pedidosSoloDeEstaBodega, porBodega = {}) => pedir("PUT", "/supervisor/almacenes",
       { almacenes, pedidosSoloDeEstaBodega, ...porBodega }),
     // Registrar un código de barras que SAP no tiene: cualquiera que cuente (operador o supervisor). Quitarlo, solo el supervisor.
@@ -100,6 +101,13 @@ export function crearApi({ token, base = "", fetchImpl = (...args) => globalThis
     // Conteo de una bodega (grande o pequena): lo que falta contar o lo contado, con el avance.
     conteo: (bodega, { estado = "falta", buscar = "", pagina = 0 } = {}) => pedir("GET", `/inventario/conteo/${bodega}?${new URLSearchParams({
       estado, pagina: String(pagina), limit: "50", ...(buscar ? { buscar } : {}) })}`),
+    // Almacenes solo para contar (la 03, la 04): la lista con el avance, la ficha del conteo y guardar (o corregir) lo contado.
+    // cuerpo: { operacionId, grupos, bulto } por cajas o { operacionId, lotes } por lote; vacío, no hay.
+    conteoAlmacen: (almacen, { estado = "falta", buscar = "", pagina = 0 } = {}) => pedir("GET",
+      `/inventario/conteo-almacenes/${encodeURIComponent(almacen)}?${new URLSearchParams({ estado, pagina: String(pagina), limit: "50", ...(buscar ? { buscar } : {}) })}`),
+    productoConteoAlmacen: (almacen, itemCode) => pedir("GET", `/inventario/conteo-almacenes/${encodeURIComponent(almacen)}/productos/${encodeURIComponent(itemCode)}`),
+    guardarConteoAlmacen: (almacen, itemCode, cuerpo) => pedir("PUT",
+      `/inventario/conteo-almacenes/${encodeURIComponent(almacen)}/productos/${encodeURIComponent(itemCode)}`, cuerpo),
     // "No hay": se contó en esa bodega y no había ninguno. cuerpo: { operacionId, bodega }.
     sinExistencia: (itemCode, cuerpo) => pedir("POST", `/inventario/productos/${encodeURIComponent(itemCode)}/sin-existencia`, cuerpo),
     caja: (codigo) => pedir("GET", `/inventario/cajas/${encodeURIComponent(codigo)}`),
