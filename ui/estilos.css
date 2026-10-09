@@ -900,11 +900,87 @@ h2 {
 .impresion { display: none; }
 @media print {
   @page { margin: 8mm; }
-  body { background: #fff; }
+  /* Blanco también en los márgenes de la hoja (sin esto queda el fondo de la ventana). */
+  html, body { background: #fff; }
   body > :not(.impresion) { display: none !important; }
   .impresion { display: block; }
   .impresion .etiqueta-caja { width: 90mm; margin: 0 0 6mm; page-break-inside: avoid; break-inside: avoid; }
   .impresion .etiqueta__barras { max-width: none; height: 16mm; }
+}
+
+/* ---------- Reportes (panel del supervisor): cuadre con SAP en pantalla y en PDF ---------- */
+.reporte__encabezado { display: flex; flex-wrap: wrap; align-items: flex-end; justify-content: space-between; gap: 12px 16px; margin: 0 0 18px; }
+.reporte__encabezado h2 { margin: 0 0 4px; }
+.reporte__encabezado p { margin: 0; }
+.reporte-cifras { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 14px; margin: 0 0 18px; }
+.reporte-cifra { display: grid; gap: 4px; padding: 16px 18px; background: var(--superficie); border: 1px solid var(--linea);
+  border-top: 5px solid var(--borde-control); border-radius: var(--radio); }
+.reporte-cifra strong { font-family: var(--letra-titulo); font-size: 46px; font-weight: 800; line-height: 1; font-variant-numeric: tabular-nums; }
+.reporte-cifra__texto { font-size: 18px; font-weight: 700; }
+.reporte-cifra--ok { border-top-color: var(--ok); } .reporte-cifra--ok strong { color: var(--ok-texto); }
+.reporte-cifra--menos { border-top-color: var(--error); } .reporte-cifra--menos strong { color: var(--error); }
+.reporte-cifra--mas { border-top-color: var(--alerta); } .reporte-cifra--mas strong { color: var(--alerta-texto); }
+.reporte-destacados { margin: 0 0 14px; padding: 14px 18px 14px 36px; background: var(--lila-claro); border: 1px solid var(--linea);
+  border-left: 5px solid var(--accion); border-radius: var(--radio); font-size: 17px; }
+.reporte-destacados li + li { margin-top: 6px; }
+.reporte-lectura { margin: 0 0 22px; font-size: 15px; color: var(--tinta-suave); }
+.reporte-seccion { margin: 0 0 26px; }
+.reporte-seccion h3 { display: flex; align-items: center; gap: 10px; margin: 0 0 4px; font-family: var(--letra-titulo); font-size: 26px; font-weight: 800; text-transform: uppercase; }
+.reporte-seccion h3::before { content: ""; width: 8px; height: 26px; border-radius: 3px; background: var(--borde-control); }
+.reporte-seccion--menos h3::before { background: var(--error); }
+.reporte-seccion--mas h3::before { background: var(--alerta); }
+.reporte-seccion > p { margin: 0 0 10px; }
+.reporte-vacio { padding: 14px 18px; background: var(--superficie); border: 1px dashed var(--linea); border-radius: var(--radio); }
+.reporte-nota { font-size: 14px; }
+.tabla-cuadre th, .tabla-cuadre td { padding: 10px 12px; font-size: 15px; }
+.tabla-cuadre thead th { font-size: 12px; }
+.tabla-cuadre .tabla-cuadre__grupo { text-align: center; color: var(--accion); background: var(--lila-claro); }
+.tabla-cuadre tbody th { font-weight: 600; min-width: 220px; }
+.tabla-cuadre .codigo { white-space: nowrap; color: var(--tinta-suave); }
+.tabla-cuadre td small { display: block; font-size: 12px; }
+.dif { font-weight: 700; white-space: nowrap; }
+.dif--menos { color: var(--error); }
+.dif--mas { color: var(--alerta-texto); }
+.dif--cero { color: var(--tinta-suave); font-weight: 500; }
+.dif--total.dif--menos { background: var(--error-fondo); }
+.dif--total.dif--mas { background: var(--alerta-fondo); }
+.hoja-reporte__portada { display: none; }
+@media (max-width: 1000px) { .reporte-cifras { grid-template-columns: 1fr; } }
+
+@media print {
+  @page reporte { size: Letter; margin: 14mm 12mm 16mm; }
+  .hoja-reporte { page: reporte; font-size: 10.5pt; line-height: 1.4; color: var(--tinta); }
+  .hoja-reporte__portada { display: block; margin: 0 0 5mm; padding: 7mm 9mm 6mm; color: #fff; background: var(--tinta);
+    border-bottom: 5px solid var(--accion); border-radius: 8px; }
+  .hoja-reporte__portada h1 { margin: 1.5mm 0; color: #fff; font-size: 30pt; text-transform: uppercase; }
+  .hoja-reporte__marca { margin: 0; font-family: var(--letra-titulo); font-size: 9.5pt; font-weight: 700; letter-spacing: 0.18em; text-transform: uppercase; color: var(--lila-texto); }
+  .hoja-reporte__sub { margin: 0; font-size: 12.5pt; color: var(--lila); }
+  .hoja-reporte__fecha { margin: 4mm 0 0; font-size: 9.5pt; color: var(--lila-texto); }
+  .hoja-reporte .reporte-cifras { grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 3mm; margin-bottom: 5mm; }
+  .hoja-reporte .reporte-cifra { padding: 3.5mm 4mm; border-top-width: 4px; break-inside: avoid; }
+  .hoja-reporte .reporte-cifra strong { font-size: 28pt; }
+  .hoja-reporte .reporte-cifra__texto { font-size: 10.5pt; }
+  .hoja-reporte .reporte-cifra .suave { font-size: 9pt; }
+  .hoja-reporte .reporte-destacados { padding: 4mm 5mm 4mm 10mm; font-size: 10.5pt; break-inside: avoid; }
+  .hoja-reporte .reporte-lectura { margin-bottom: 3mm; font-size: 9.5pt; }
+  .hoja-reporte .reporte-nota { font-size: 9pt; }
+  .hoja-reporte .reporte-seccion { margin: 0; break-before: page; }
+  .hoja-reporte .reporte-seccion h3 { font-size: 18pt; }
+  .hoja-reporte .reporte-seccion h3::before { height: 7mm; width: 3mm; }
+  .hoja-reporte .reporte-seccion > p { font-size: 9.5pt; }
+  .hoja-reporte .reporte-seccion + .reporte-nota { margin-top: 4mm; }
+  .hoja-reporte .tabla-envoltura { overflow: visible; border-radius: 0; }
+  .hoja-reporte .tabla-cuadre { border: 0; box-shadow: none; overflow: visible; }
+  .hoja-reporte .tabla-cuadre thead { display: table-header-group; }
+  .hoja-reporte .tabla-cuadre tr { break-inside: avoid; }
+  .hoja-reporte .tabla-cuadre th, .hoja-reporte .tabla-cuadre td { padding: 1.3mm 1.6mm; font-size: 8.6pt; line-height: 1.3; }
+  .hoja-reporte .tabla-cuadre thead th { font-size: 7.8pt; background: none; border-bottom: 1.5px solid var(--tinta); }
+  .hoja-reporte .tabla-cuadre thead tr:first-child th { border-bottom: 0; padding-bottom: 0; }
+  .hoja-reporte .tabla-cuadre tbody th { min-width: 0; width: 38%; }
+  .hoja-reporte .tabla-cuadre tbody tr:nth-child(even) > * { background: #faf9fc; }
+  .hoja-reporte .tabla-cuadre .dif--total { font-size: 9.4pt; font-weight: 800; }
+  .hoja-reporte .tabla-cuadre tbody tr > .dif--total.dif--menos { background: var(--error-fondo); }
+  .hoja-reporte .tabla-cuadre tbody tr > .dif--total.dif--mas { background: var(--alerta-fondo); }
 }
 
 /* ---------- Descuentos ---------- */

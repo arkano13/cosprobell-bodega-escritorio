@@ -1,7 +1,7 @@
 // Proceso principal de la app de escritorio: una sola ventana con la pantalla de bodega.
 // La página no accede a Node, no abre otras ventanas y no navega fuera de sus propios archivos.
-import { app, BrowserWindow, Menu, ipcMain, net, protocol, session } from "electron";
-import { readFile } from "node:fs/promises";
+import { app, BrowserWindow, Menu, dialog, ipcMain, net, protocol, session, shell } from "electron";
+import { readFile, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { ORIGEN, cabeceras, resolverArchivo } from "./archivos.js";
@@ -9,9 +9,11 @@ import { crearPreferencias } from "./preferencias.js";
 import { elegirServidor } from "./servidor.js";
 import { crearIngreso, datosIngresoValidos, leerClaveIngreso } from "./ingreso.js";
 import { iniciarActualizaciones } from "./actualizaciones.js";
+import { guardarPdf } from "./pdf.js";
 
 const RAIZ = path.join(path.dirname(fileURLToPath(import.meta.url)), "..");
 const UI = path.join(RAIZ, "ui");
+const FONDO_VENTANA = "#f4f2f8";
 
 // Solo para pruebas: carpeta de datos separada, así no se mezcla con la del equipo.
 if (!app.isPackaged && process.env.BODEGA_DATOS) app.setPath("userData", process.env.BODEGA_DATOS);
@@ -83,6 +85,28 @@ async function iniciar() {
       evento.sender.print({ printBackground: true }, (ok, motivo) => resolver({ ok, motivo: ok ? null : String(motivo ?? "") }));
     });
   });
+  // Reportes: guarda en PDF lo que la página dejó en su zona de impresión, donde elija el supervisor, y lo abre.
+  // En las pruebas (BODEGA_CARPETA_REPORTES) se guarda directo en esa carpeta, sin diálogo y sin abrirlo.
+  ipcMain.handle("reporte:pdf", (evento, datos) => {
+    validarRemitente(evento);
+    const prueba = !app.isPackaged ? process.env.BODEGA_CARPETA_REPORTES : null;
+    const duena = BrowserWindow.fromWebContents(evento.sender);
+    // El PDF lleva el color de fondo de la ventana en los márgenes: mientras se arma, blanco.
+    const contenido = { printToPDF: async (opciones) => {
+      duena?.setBackgroundColor("#ffffff");
+      try { return await evento.sender.printToPDF(opciones); } finally { duena?.setBackgroundColor(FONDO_VENTANA); }
+    } };
+    return guardarPdf({
+      contenido, datos, carpeta: prueba || app.getPath("documents"),
+      elegirArchivo: async (sugerida) => {
+        if (prueba) return sugerida;
+        const r = await dialog.showSaveDialog(duena, { title: "Guardar el reporte", defaultPath: sugerida, filters: [{ name: "PDF", extensions: ["pdf"] }] });
+        return r.canceled || !r.filePath ? null : r.filePath;
+      },
+      escribir: (ruta, pdf) => writeFile(ruta, pdf),
+      abrir: async (ruta) => { if (!prueba) await shell.openPath(ruta); },
+    });
+  });
   ipcMain.handle("actualizacion:pendiente", (evento) => {
     validarRemitente(evento);
     return actualizaciones?.pendiente() ?? null;
@@ -142,7 +166,7 @@ function crearVentana() {
     minHeight: 620,
     show: false,
     title: "Bodega · Cosprobell",
-    backgroundColor: "#f4f2f8",
+    backgroundColor: FONDO_VENTANA,
     fullscreen: inicial.pantallaCompleta,
     // En Windows la ventana usa el ícono del programa instalado.
     icon: process.platform === "win32" ? undefined : path.join(RAIZ, "build", "icon.png"),

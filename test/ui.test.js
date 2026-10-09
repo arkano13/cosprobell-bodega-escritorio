@@ -4,6 +4,7 @@ import { crearApi, ErrorApi } from "../ui/js/api.js";
 import { crearColaLecturas } from "../ui/js/lecturas.js";
 import { nuevoUuid } from "../ui/js/uuid.js";
 import { HORAS_EN_LISTA, sigueEnLista, textosPreparado } from "../ui/js/preparados.js";
+import { conSigno, destacadosCuadre, nombreArchivoCuadre, notaCuadre, porcentaje, unidadesConSigno } from "../ui/js/reportes.js";
 import { estadoDatos, estadoOperador, puedeSerUnidad, quienConfirmo, textoCambio, textoRevision, textoSinEntrega, textoUnidad } from "../ui/js/supervisor.js";
 
 const sinEspera = async () => {};
@@ -571,4 +572,32 @@ test("traspaso escaneando: cada caja es una entera del lote y fecha que dice; el
   assert.equal(venceDespues(L2, L1), true);
   assert.equal(venceDespues(L1, L1), false);
   assert.equal(venceDespues({ lote: "X", vencimiento: null }, L1), true, "sin vencimiento cuenta como después");
+});
+
+test("reportes: signos, porcentaje, frases destacadas, nota y nombre del PDF", () => {
+  assert.equal(conSigno(15), "+15");
+  assert.equal(conSigno(-1200), "−1,200");
+  assert.equal(conSigno(0), "0");
+  assert.equal(unidadesConSigno(-1), "−1 unidad");
+  assert.equal(unidadesConSigno(65), "+65 unidades");
+  assert.equal(porcentaje(133, 223), 60);
+  assert.equal(porcentaje(0, 0), 0);
+  const fila = (itemCode, itemName, grande, pequena) => ({ itemCode, itemName, diferencia: grande[2] + pequena[2],
+    grande: { contado: grande[0], sap: grande[1], diferencia: grande[2] }, pequena: { contado: pequena[0], sinEntrega: 0, sap: pequena[1], diferencia: pequena[2] } });
+  const nombres = { grande: "la 01", pequena: "la 02" };
+  const resumen = { contados: 3, cuadran: 1, menos: { productos: 1, unidades: -129 }, mas: { productos: 1, unidades: 15 }, pendientes: 0, actualizando: 0 };
+  const uv = fila("CH10112", "UV Daily", [0, 0, 0], [20, 149, -129]);
+  const abh = fila("ER10012", "Abh Color Care", [0, 0, 0], [34, 19, 15]);
+  assert.deepEqual(destacadosCuadre({ resumen, menos: [uv], mas: [abh] }, nombres), [
+    "La 01 cuadra con SAP en todos los productos contados: las diferencias están en la 02.",
+    "El faltante más grande es UV Daily: −129 (contado 20, SAP 149).",
+    "El sobrante más grande es Abh Color Care: +15.",
+  ]);
+  const z12 = fila("ER10635", "Z12P Purify 750ml", [42, 60, -18], [6, 6, 0]);
+  assert.equal(destacadosCuadre({ resumen, menos: [z12], mas: [] }, nombres)[0], "En la 01 no cuadra 1 producto: Z12P Purify 750ml (−18).");
+  assert.deepEqual(destacadosCuadre({ resumen: { ...resumen, contados: 4, cuadran: 4 }, menos: [], mas: [] }, nombres), ["Todo lo contado cuadra con SAP (4 productos)."]);
+  assert.deepEqual(destacadosCuadre({ resumen: { ...resumen, contados: 0 }, menos: [], mas: [] }, nombres), ["Todavía no hay productos contados en las dos bodegas."]);
+  assert.match(notaCuadre({ pendientes: 26, actualizando: 1 }), /no incluye 26 productos que todavía falta contar; 1 producto se está actualizando/);
+  assert.doesNotMatch(notaCuadre({ pendientes: 0, actualizando: 0 }), /falta contar|actualizando/);
+  assert.equal(nombreArchivoCuadre(new Date(2026, 9, 9, 15, 7).toISOString()), "Cuadre-SAP-2026-10-09-1507.pdf");
 });

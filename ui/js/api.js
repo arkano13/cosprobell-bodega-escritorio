@@ -70,6 +70,7 @@ export function crearApi({ token, base = "", fetchImpl = (...args) => globalThis
     revisiones: () => pedir("GET", "/supervisor/revisiones"),
     anularRevision: (pickingId) => pedir("POST", `/supervisor/revisiones/${pickingId}/anulacion`),
     sincronizacion: () => pedir("GET", "/supervisor/sincronizacion"),
+    reporteCuadre: () => pedir("GET", "/supervisor/reportes/cuadre"),
     almacenes: () => pedir("GET", "/supervisor/almacenes"),
     // porBodega: { almacenGrande, almacenPequena }, qué almacén marcado es cada bodega (null: sin asignar).
     elegirAlmacenes: (almacenes, pedidosSoloDeEstaBodega, porBodega = {}) => pedir("PUT", "/supervisor/almacenes",
