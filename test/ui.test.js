@@ -190,7 +190,7 @@ import { ESTADOS, armarAsignaciones, armarConteo, armarGrupos, armarLotesDespach
   filtrosBodega, filtrosExistencias, finDeMes, nombreOpcion, textoLoteBodega, cajasDeLaGrande, cajasEscaneadas, lotesParaEscanear, venceDespues,
   opcionesDescuento, quien, resumenRecepcion, revisarDespacho, sugerirAsignacion, textoAsignacion, textoDocumento, textoEstado, textoMovimiento,
   textoPorVencer, textoVencimiento, unidadesPorProducto, nombreBodega, haceTiempo, estadoSap, avanceConteo, pasosPuestaEnMarcha, armarLotesPequena,
-  armarConteoCajas, conteoGuardadoGrande, cuerpoEdicionGrande, textoContado, filasTraspaso, resumenTraspaso, pareceCodigoBarras } from "../ui/js/inventario.js";
+  armarConteoCajas, conteoGuardadoAlmacen, conteoGuardadoGrande, cuerpoEdicionGrande, textoContado, filasTraspaso, resumenTraspaso, pareceCodigoBarras } from "../ui/js/inventario.js";
 
 // Bodegas con su almacén asignado, como las devuelve el servidor.
 const BODEGAS = { grande: { almacen: "01", nombre: "Almacén Principal" }, pequena: { almacen: "02", nombre: "Despacho" } };
@@ -600,4 +600,14 @@ test("reportes: signos, porcentaje, frases destacadas, nota y nombre del PDF", (
   assert.match(notaCuadre({ pendientes: 26, actualizando: 1 }), /no incluye 26 productos que todavía falta contar; 1 producto se está actualizando/);
   assert.doesNotMatch(notaCuadre({ pendientes: 0, actualizando: 0 }), /falta contar|actualizando/);
   assert.equal(nombreArchivoCuadre(new Date(2026, 9, 9, 15, 7).toISOString()), "Cuadre-SAP-2026-10-09-1507.pdf");
+});
+
+test("conteo de un almacén solo para contar por cajas: lo guardado vuelve al formulario como filas y bulto", () => {
+  assert.deepEqual(conteoGuardadoAlmacen([
+    { lote: "A", vencimiento: "2027-01-31", cajas: 3, unidadesPorCaja: 12, unidades: 36 },
+    { lote: null, vencimiento: null, cajas: 1, unidadesPorCaja: 6, unidades: 6 },
+    { lote: "A", vencimiento: "2027-01-31", cajas: null, unidadesPorCaja: null, unidades: 4 },
+  ]), { filas: [{ cajas: 3, unidadesPorCaja: 12, lote: "A", vencimiento: "2027-01-31" }, { cajas: 1, unidadesPorCaja: 6, lote: null, vencimiento: null }],
+    bulto: { unidades: 4, lote: "A", vencimiento: "2027-01-31" } });
+  assert.deepEqual(conteoGuardadoAlmacen([]), { filas: [], bulto: null });
 });

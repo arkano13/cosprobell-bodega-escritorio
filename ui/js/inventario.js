@@ -190,6 +190,16 @@ export function conteoGuardadoGrande(lotes) {
   return { filas: [...filas.values()], bulto: b ? { unidades: b.unidades, lote: b.lote ?? null, vencimiento: b.vencimiento ?? null } : null };
 }
 
+// Lo guardado en un almacén solo para contar por cajas, para editarlo con el mismo formulario: las líneas con cajas son
+// filas y la que no tiene cajas, el bulto. lineas: [{ lote, vencimiento, cajas, unidadesPorCaja, unidades }].
+export function conteoGuardadoAlmacen(lineas) {
+  const bulto = lineas.find((l) => l.cajas === null) ?? null;
+  return {
+    filas: lineas.filter((l) => l.cajas !== null).map((l) => ({ cajas: l.cajas, unidadesPorCaja: l.unidadesPorCaja, lote: l.lote ?? null, vencimiento: l.vencimiento ?? null })),
+    bulto: bulto ? { unidades: bulto.unidades, lote: bulto.lote ?? null, vencimiento: bulto.vencimiento ?? null } : null,
+  };
+}
+
 // Cuerpo de la edición del conteo de la grande ({ grupos, bulto }) a partir de lo que armó armarConteoCajas.
 export const cuerpoEdicionGrande = (cuerpo) => (cuerpo.modo === "suelto"
   ? { grupos: [], bulto: { unidades: cuerpo.unidades, lote: cuerpo.lote ?? null, vencimiento: cuerpo.vencimiento ?? null } }

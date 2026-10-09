@@ -3,7 +3,7 @@ import { crearColaLecturas } from "./lecturas.js";
 import { icono } from "./iconos.js";
 import { HORAS_EN_LISTA, sigueEnLista, textosPreparado } from "./preparados.js";
 import { NOMBRES_DATOS, estadoDatos, estadoOperador, puedeSerUnidad, quienConfirmo, textoCambio, textoRevision, textoSinEntrega, textoUnidad } from "./supervisor.js";
-import { ESTADOS, TEXTO_SIN_COMPARACION, armarAsignaciones, armarConteo, armarConteoCajas, conteoGuardadoGrande, cuerpoEdicionGrande, armarGrupos, armarLotesDespacho, armarLotesPequena, avanceConteo,
+import { ESTADOS, TEXTO_SIN_COMPARACION, armarAsignaciones, armarConteo, armarConteoCajas, conteoGuardadoAlmacen, conteoGuardadoGrande, cuerpoEdicionGrande, armarGrupos, armarLotesDespacho, armarLotesPequena, avanceConteo,
   cantidadMovimiento, diasParaVencer, esCodigoCaja, pareceCodigoBarras, estadoFila, estadoSap, filtrosBodega, filtrosExistencias, finDeMes, nombreBodega, nombreOpcion, opcionesDescuento,
   pasosPuestaEnMarcha, quien, filasTraspaso, resumenTraspaso, cajasDeLaGrande, cajasEscaneadas, lotesParaEscanear, venceDespues, resumenRecepcion, revisarDespacho, sugerirAsignacion, textoAsignacion, textoContado, textoDocumento, textoEstado, textoLoteBodega,
   textoMovimiento, textoPorVencer, textoVencimiento, unidadesPorProducto } from "./inventario.js";
@@ -101,7 +101,7 @@ const estado = {
   pendientesInventario: 0, // por ubicar + por descontar, para la insignia de la sección Inventario
   desdeLista: null, // { buscar, filtro, pagina } si la ficha del producto se abrió desde la lista de productos
   desdeBodegas: null, // { almacen, buscar, pagina } si se abrió desde la sección Bodegas
-  desdeConteo: null, // "grande" o "pequena" si la ficha se abrió desde el modo conteo
+  desdeConteo: null, // "grande", "pequena" o { almacen } si la ficha se abrió desde el modo conteo
   bodegas: undefined, // { grande, pequena }: el almacén de SAP de cada bodega ({ almacen, nombre } o null), al cargar el inventario
 };
 const ingresoVigente = (ingreso) => Boolean(ingreso?.token && Date.parse(ingreso.expiraEn) > Date.now());
@@ -1335,7 +1335,32 @@ function contenidoCuadre(r) {
     seccion("menos", "Con menos que SAP", r.menos, "De mayor a menor faltante. En Pendientes aparecen como Falta guardar."),
     seccion("mas", "Con más que SAP", r.mas, "De mayor a menor sobrante. En Pendientes aparecen como Falta marcar salida."),
     h("p", { class: "suave reporte-nota" }, notaCuadre(resumen)),
+    ...(r.almacenes ?? []).map(seccionAlmacen),
   ];
+}
+
+// Almacén solo para contar (la 03, la 04): lo contado frente a lo que SAP tiene ahora en ese almacén.
+function seccionAlmacen(a) {
+  const { resumen } = a;
+  const cajas = a.tipo === "cajas";
+  const tabla = (lista) => (lista.length ? h("div", { class: "tabla-envoltura" }, h("table", { class: "tabla tabla-cuadre tabla-cuadre--almacen" },
+    h("thead", {}, h("tr", {}, ["Código", "Producto", "Contado", "SAP", "Diferencia"].map((t, i) => h("th", { scope: "col", class: i >= 2 ? "tabla__numero" : null }, t)))),
+    h("tbody", {}, lista.map((x) => h("tr", {},
+      h("td", { class: "codigo" }, x.itemCode), h("th", { scope: "row" }, x.itemName),
+      h("td", { class: "tabla__numero" }, numero(x.contado), cajas && x.cajas ? h("small", { class: "suave" }, ` en ${numero(x.cajas)} ${x.cajas === 1 ? "caja" : "cajas"}`) : ""),
+      h("td", { class: "tabla__numero suave" }, numero(x.sap)),
+      h("td", { class: `tabla__numero dif dif--total dif--${x.diferencia < 0 ? "menos" : "mas"}` }, conSigno(x.diferencia)))))))
+    : h("p", { class: "reporte-vacio" }, "Ninguno."));
+  return h("section", { class: "reporte-almacen" },
+    h("h3", {}, `La ${a.almacen} · ${a.nombre}`),
+    h("p", { class: "suave" }, `Solo conteo, ${cajas ? "por cajas" : "por lote"}. Se compara con lo que SAP tiene ahora en la ${a.almacen}: si SAP se movió después de contar, hay que recontar ese producto.`),
+    h("p", { class: "reporte-almacen__cifras" },
+      h("strong", { class: "reporte-almacen__ok" }, `${numero(resumen.cuadran)} ${resumen.cuadran === 1 ? "cuadra" : "cuadran"}`), " · ",
+      h("strong", { class: "dif--menos" }, `${numero(resumen.menos.productos)} con menos${resumen.menos.productos ? ` (${unidadesConSigno(resumen.menos.unidades)})` : ""}`), " · ",
+      h("strong", { class: "dif--mas" }, `${numero(resumen.mas.productos)} con más${resumen.mas.productos ? ` (${unidadesConSigno(resumen.mas.unidades)})` : ""}`),
+      resumen.pendientes ? ` · ${numero(resumen.pendientes)} sin contar` : ""),
+    h("h4", {}, "Con menos que SAP"), tabla(a.menos),
+    h("h4", {}, "Con más que SAP"), tabla(a.mas));
 }
 
 function tablaCuadre(lista) {
@@ -1684,6 +1709,7 @@ async function vistaProducto(itemCode, mensaje = null) {
   const { desdeLista, desdeConteo, desdeBodegas } = estado;
   const volver = desdeBodegas ? volverA("Bodegas", () => vistaBodegas(desdeBodegas))
     : desdeLista ? volverA("Productos", () => vistaProductos(desdeLista))
+    : desdeConteo?.almacen ? volverA(`Contar la ${desdeConteo.almacen}`, () => vistaConteo({ almacen: desdeConteo.almacen }))
     : desdeConteo ? volverA(`Contar ${bodegaNombre(desdeConteo, { corto: true })}`, () => vistaConteo({ bodega: desdeConteo }))
       : volverInventario();
   (desdeBodegas ? mostrarBodegas : mostrarInventario)(volver,
@@ -2394,7 +2420,7 @@ const avisarCambio = (elemento) => elemento.dispatchEvent(new Event("input", { b
 // suelto como un bulto con etiqueta. Los id llevan el prefijo: rec-cajas, rec-por-caja, rec-lote, rec-vence, rec-g1-cajas…,
 // rec-bulto, rec-bulto-lote y rec-bulto-vence. cajas: lo que trae escrito la primera fila. valores: lo ya guardado
 // ({ filas, bulto }, de conteoGuardadoGrande), para editar el conteo.
-function formularioCajas({ prefijo, sugerencia = null, cajas = "1", valores = null }) {
+function formularioCajas({ prefijo, sugerencia = null, cajas = "1", valores = null, conEtiquetas = true }) {
   const filas = [];
   const lista = h("ol", { class: "grupos-cajas" });
   let siguiente = 0;
@@ -2426,7 +2452,8 @@ function formularioCajas({ prefijo, sugerencia = null, cajas = "1", valores = nu
     lista,
     boton("", "mas", "Agregar otro lote", { onclick: () => { agregar().cajas.focus(); avisarCambio(lista); } }),
     h("fieldset", { class: "bulto" }, h("legend", {}, "¿Sobraron unidades sueltas?"),
-      h("p", { class: "suave" }, "Quedan en la misma bodega como un bulto con su etiqueta. Si no sobró nada, dejalo vacío."),
+      h("p", { class: "suave" }, conEtiquetas ? "Quedan en la misma bodega como un bulto con su etiqueta. Si no sobró nada, dejalo vacío."
+        : "Se cuentan aparte, como un bulto. Si no sobró nada, dejalo vacío."),
       h("div", { class: "rejilla-campos" }, campoCon(`${prefijo}-bulto`, "Unidades", bulto.unidades), campoCon(`${prefijo}-bulto-lote`, "Lote", bulto.lote),
         campoCon(`${prefijo}-bulto-vence`, "Vence", bulto.vence))));
   return {
@@ -2442,7 +2469,7 @@ function formularioCajas({ prefijo, sugerencia = null, cajas = "1", valores = nu
 }
 
 // Unidades sueltas por lote (bodega de despacho): una fila por lote. Los id: conteo-l0-unidades, conteo-l0-lote…
-function formularioLotes({ prefijo }) {
+function formularioLotes({ prefijo, valores = null }) {
   const filas = [];
   const lista = h("ol", { class: "grupos-cajas" });
   let siguiente = 0;
@@ -2459,7 +2486,11 @@ function formularioLotes({ prefijo }) {
     lista.append(f.elemento);
     return f;
   }
-  agregar();
+  // valores: [{ unidades, lote, vencimiento }] para editar lo que se guardó.
+  for (const v of valores?.length ? valores : [null]) {
+    const f = agregar();
+    if (v) { f.unidades.value = String(v.unidades); f.lote.value = v.lote ?? ""; ponerMes(f.vence, v.vencimiento); }
+  }
   const elemento = h("div", {},
     h("p", { class: "suave" }, "Una fila por cada lote. Si no tiene lote, dejá el lote vacío."),
     lista,
@@ -2915,25 +2946,38 @@ async function elegirConteo() {
   mostrarInventario(volverInventario(),
     h("div", { class: "encabezado" }, h("div", {}, h("h1", {}, "Contar"),
       h("p", { class: "encabezado__sub" }, "Elegí qué bodega vas a contar. Se cuenta producto por producto y el avance queda guardado."))),
-    h("div", { class: "bodegas" }, tarjeta("grande"), tarjeta("pequena")));
+    h("div", { class: "bodegas" }, tarjeta("grande"), tarjeta("pequena"),
+      (r.soloConteo ?? []).map((a) => {
+        const av = avanceConteo(a.avance);
+        return h("section", { class: "tarjeta bodega" },
+          h("h2", {}, icono(a.tipo === "cajas" ? "caja" : "capas"), `Contar la ${a.almacen}`),
+          h("p", { class: "suave" }, `${a.almacen} · ${a.nombre} · ${a.tipo === "cajas" ? "se cuentan las cajas de cada lote" : "se cuentan las unidades de cada lote"}. Solo conteo.`),
+          barraAvance(a.avance, `Avance del conteo de la ${a.almacen}`),
+          boton("boton--principal boton--grande", "contar", av?.completo ? "Ver lo contado" : "Contar", { onclick: () => vistaConteo({ almacen: a.almacen }) }));
+      })));
 }
 
 // En la de cajas se cuentan las cajas de cada lote y lo suelto como un bulto; en la de despacho, las unidades de cada
 // lote. Al guardar (o con «No hay») pasa solo al siguiente producto que falta contar. itemCode abre ese producto.
-async function vistaConteo({ bodega = null, itemCode = null, editar: editarAlAbrir = false } = {}) {
-  if (!bodega) return elegirConteo();
+// almacen: un almacén solo para contar (la 03, la 04), por cajas o por lote según cómo lo eligió el supervisor; se
+// guarda lo contado sin movimientos ni etiquetas y un conteo ya guardado lo corrige el supervisor.
+async function vistaConteo({ bodega = null, almacen = null, itemCode = null, editar: editarAlAbrir = false } = {}) {
+  if (!bodega && !almacen) return elegirConteo();
   estado.desdeLista = null; estado.desdeConteo = null; estado.desdeBodegas = null;
-  const grande = bodega === "grande";
   mostrarInventario(cargando("Cargando el conteo…"));
+  const listar = (opciones) => (almacen ? api.conteoAlmacen(almacen, opciones) : api.conteo(bodega, opciones));
   let primera;
-  try { primera = await api.conteo(bodega); } catch (error) {
-    if (error.codigo !== "BODEGA_SIN_ALMACEN") return mostrarError(error, () => vistaConteo({ bodega, itemCode }));
+  try { primera = await listar(); } catch (error) {
+    if (error.codigo !== "BODEGA_SIN_ALMACEN" && error.codigo !== "ALMACEN_NO_ES_DE_CONTEO") return mostrarError(error, () => vistaConteo({ bodega, almacen, itemCode }));
     return mostrarInventario(volverA("Contar", () => elegirConteo()),
-      h("div", { class: "encabezado" }, h("h1", {}, `Contar ${bodegaNombre(bodega, { corto: true })}`)),
+      h("div", { class: "encabezado" }, h("h1", {}, `Contar ${almacen ? `la ${almacen}` : bodegaNombre(bodega, { corto: true })}`)),
       aviso("info", error.mensaje, {}, esSupervisor() && boton("", "bodega", "Elegir almacenes", { onclick: () => vistaSupervisor("almacenes") })));
   }
-  recordarBodegas({ ...(estado.bodegas ?? {}), [bodega]: primera.almacen });
-  const corto = bodegaNombre(bodega, { corto: true });
+  // Almacén solo para contar: { almacen, nombre, tipo }.
+  const extra = almacen ? primera.almacen : null;
+  const grande = extra ? extra.tipo === "cajas" : bodega === "grande";
+  if (!extra) recordarBodegas({ ...(estado.bodegas ?? {}), [bodega]: primera.almacen });
+  const corto = extra ? `la ${extra.almacen}` : bodegaNombre(bodega, { corto: true });
   const otra = grande ? "pequena" : "grande";
   let lista = "falta", buscar = "", pagina = 0, filas = [], actual = null, vez = 0, vezPanel = 0, espera = null, repintar = null;
 
@@ -3023,7 +3067,7 @@ async function vistaConteo({ bodega = null, itemCode = null, editar: editarAlAbr
         onclick: () => { lista = id; pagina = 0; cargar(); } }, texto, h("span", { class: "contador" }, numero(n)))));
   }
   function pintarCola() {
-    if (!grande) return;
+    if (!grande || extra) return;
     const pendientes = etiquetasPendientes();
     const casilla = h("input", { id: "conteo-imprimir", type: "checkbox", checked: imprimirAlGuardar(),
       onchange: (evento) => { guardado.escribir("imprimirAlGuardar", evento.target.checked); repintar?.(); } });
@@ -3086,7 +3130,7 @@ async function vistaConteo({ bodega = null, itemCode = null, editar: editarAlAbr
   async function cargar() {
     const esta = ++vez;
     let r;
-    try { r = await api.conteo(bodega, { estado: lista, buscar, pagina }); } catch (error) {
+    try { r = await listar({ estado: lista, buscar, pagina }); } catch (error) {
       if (error.status === 401) return mostrarError(error);
       poner(filasLista, h("li", {}, aviso("error", error.mensaje, { role: "alert" })));
       return null;
@@ -3096,7 +3140,7 @@ async function vistaConteo({ bodega = null, itemCode = null, editar: editarAlAbr
     return r;
   }
 
-  const sapEn = (p) => p.sapPorBodega?.[bodega] ?? null;
+  const sapEn = (p) => (extra ? p.sap ?? null : p.sapPorBodega?.[bodega] ?? null);
   // Los códigos de barras del producto abierto van en la línea del encabezado; sin ninguno, un aviso para registrarlo
   // ahí mismo escaneando el envase.
   let pintarCodigos = null;
@@ -3124,7 +3168,7 @@ async function vistaConteo({ bodega = null, itemCode = null, editar: editarAlAbr
     const esta = ++vezPanel;
     poner(panel, cargando("Cargando producto…"));
     let p;
-    try { p = (await api.producto(codigo)).data; } catch (error) {
+    try { p = (await (extra ? api.productoConteoAlmacen(almacen, codigo) : api.producto(codigo))).data; } catch (error) {
       if (error.status === 401) return mostrarError(error);
       return poner(panel, aviso("error", error.mensaje, { role: "alert" }));
     }
@@ -3132,16 +3176,18 @@ async function vistaConteo({ bodega = null, itemCode = null, editar: editarAlAbr
     actual = p; repintar = null;
     marcarActual();
     if (enPantallaAncha()) window.scrollTo({ top: document.documentElement.scrollHeight });
-    if (p.contadoEn?.[bodega]) return editarlo && esSupervisor() ? editar(p) : yaContado(p);
+    if (extra ? p.contado : p.contadoEn?.[bodega]) return editarlo && esSupervisor() ? editar(p) : yaContado(p);
     formulario(p);
   }
-  function verProducto(itemCode) { estado.desdeConteo = bodega; vistaProducto(itemCode); }
+  function verProducto(itemCode) { estado.desdeConteo = extra ? { almacen } : bodega; vistaProducto(itemCode); }
   function yaContado(p) {
-    const unidadesEn = grande ? p.lotes.reduce((t, l) => t + l.unidades, 0) : p.pequena;
-    const cajas = grande ? p.lotes.reduce((t, l) => t + l.cajas.filter((c) => c.unidades > 0).length, 0) : 0;
+    const unidadesEn = extra ? p.unidades : grande ? p.lotes.reduce((t, l) => t + l.unidades, 0) : p.pequena;
+    const cajas = extra ? p.cajas : grande ? p.lotes.reduce((t, l) => t + l.cajas.filter((c) => c.unidades > 0).length, 0) : 0;
+    const bulto = extra && p.lineas.some((l) => l.cajas === null) && grande;
     const proximo = filas.find((v) => lista === "falta" && v.itemCode !== p.itemCode);
     poner(panel, cabeza(p),
-      aviso("ok", `Ya está contado en ${corto}: ${unidadesEn ? textoContado({ total: unidadesEn, cajas, etiquetas: cajas }) : "no hay"}.`),
+      aviso("ok", `Ya está contado en ${corto}: ${unidadesEn ? textoContado({ total: unidadesEn, cajas, etiquetas: cajas + (bulto ? 1 : 0) }) : "no hay"}.`
+        + (extra && p.contadoPor ? ` Lo contó ${p.contadoPor}${p.actualizadoPor && p.actualizadoPor !== p.contadoPor ? `; lo corrigió ${p.actualizadoPor}` : ""}.` : "")),
       h("p", { class: "suave" }, esSupervisor() ? "Si faltó un lote o una fecha está mal, editá el conteo: se abre con lo que se guardó."
         : "Si faltó algo, avisale al supervisor: él puede editar el conteo."),
       h("div", { class: "fila" },
@@ -3153,6 +3199,7 @@ async function vistaConteo({ bodega = null, itemCode = null, editar: editarAlAbr
   // Editar un conteo ya cerrado (supervisor). La grande abre este mismo formulario con lo guardado; la pequeña, el
   // conteo por lotes con sus lotes. Si alguna caja ya se usó, se corrige desde el producto.
   function editar(p) {
+    if (extra) return formulario(p, { edicion: grande ? conteoGuardadoAlmacen(p.lineas) : { lotes: p.lineas } });
     if (!grande) return contarPequena(p, { alTerminar: (texto) => despuesDeEditar(p, texto) });
     const guardado = conteoGuardadoGrande(p.lotes);
     if (guardado.problema) {
@@ -3170,7 +3217,8 @@ async function vistaConteo({ bodega = null, itemCode = null, editar: editarAlAbr
   function formulario(p, { edicion = null } = {}) {
     const operacion = crearOperacion();
     const sap = sapEn(p);
-    const campos = grande ? formularioCajas({ prefijo: "conteo", sugerencia: p.sugerencia, cajas: "", valores: edicion }) : formularioLotes({ prefijo: "conteo" });
+    const campos = grande ? formularioCajas({ prefijo: "conteo", sugerencia: p.sugerencia, cajas: "", valores: edicion, conEtiquetas: !extra })
+      : formularioLotes({ prefijo: "conteo", valores: edicion?.lotes });
     const total = h("p", { class: "conteo__total", "aria-live": "polite" });
     const problema = aviso("error", "", { role: "alert", hidden: true });
     const guardar = boton("boton--principal boton--grande", "completa", "Guardar", { type: "submit" });
@@ -3184,7 +3232,7 @@ async function vistaConteo({ bodega = null, itemCode = null, editar: editarAlAbr
     function pintarFormulario() {
       const r = leerConteo();
       // Al editar, solo las cajas nuevas llevan etiqueta (se informa al guardar): el botón no cuenta las que ya tienen.
-      const etiquetas = r.problema || edicion ? 0 : r.etiquetas;
+      const etiquetas = r.problema || edicion || extra ? 0 : r.etiquetas;
       guardar.replaceChildren(icono(etiquetas ? "impresora" : "completa"), !etiquetas ? (edicion ? "Guardar cambios" : "Guardar")
         : imprimirAlGuardar() ? `Guardar e imprimir ${etiquetasTexto(etiquetas)}` : `Guardar (${etiquetasTexto(etiquetas)} a la cola)`);
       total.textContent = r.problema ? "" : `Contaste ${textoContado(r)}.${sap !== null ? ` SAP tiene ${numero(sap)} en ${corto}.` : ""}`;
@@ -3200,6 +3248,7 @@ async function vistaConteo({ bodega = null, itemCode = null, editar: editarAlAbr
         const falla = await codigoCaja.registrar();
         if (falla) { guardar.disabled = false; if (falla.status === 401) return mostrarError(falla); return mostrarProblema(textoFalla(falla)); }
       }
+      if (extra) return guardarEnAlmacen(r);
       if (edicion) return guardarEdicion(r);
       try {
         const { data } = await api.recibir(operacion.para({ itemCode: p.itemCode, ...r.cuerpo, adelantar }));
@@ -3215,6 +3264,24 @@ async function vistaConteo({ bodega = null, itemCode = null, editar: editarAlAbr
               "Si contaste bien, guardalo igual: la diferencia queda anotada para revisarla con SAP."] });
           return seguir ? enviar(null, true) : undefined;
         }
+        mostrarProblema(textoFalla(error));
+      }
+    }
+    // Almacén solo para contar: se guarda lo contado (o se reemplaza, al editar), sin aviso si pasa de SAP.
+    async function guardarEnAlmacen(r) {
+      try {
+        const cuerpo = grande ? cuerpoEdicionGrande(r.cuerpo) : { lotes: r.cuerpo.lotes };
+        const { data } = await api.guardarConteoAlmacen(almacen, p.itemCode, operacion.para(cuerpo));
+        operacion.terminar();
+        const texto = `${p.itemName}: ${textoContado(r)} en ${corto}.${sap !== null && sap !== r.total ? ` SAP tiene ${numero(sap)}: queda la diferencia para revisarla.` : ""}`;
+        if (edicion) {
+          const cambio = data.antes === null ? 0 : data.unidades - data.antes;
+          return despuesDeEditar(p, `${p.itemName}: conteo editado, ${unidadesTexto(data.unidades)} en ${corto}${cambio ? ` (${cambio > 0 ? "+" : ""}${numero(cambio)})` : ""}.`);
+        }
+        await siguiente(p, texto);
+      } catch (error) {
+        guardar.disabled = false;
+        if (error.status === 401) return mostrarError(error);
         mostrarProblema(textoFalla(error));
       }
     }
@@ -3242,7 +3309,8 @@ async function vistaConteo({ bodega = null, itemCode = null, editar: editarAlAbr
     }
     poner(panel, cabeza(p),
       h("form", { class: "formulario-recepcion formulario-conteo", onsubmit: (evento) => enviar(evento), oninput: pintarFormulario, onchange: pintarFormulario },
-        edicion && aviso("info", "Editando el conteo guardado: dejá todo como está realmente en la bodega. Las cajas que no cambian conservan su etiqueta."),
+        edicion && aviso("info", extra ? `Editando el conteo guardado: dejá todo como está realmente en ${corto}.`
+          : "Editando el conteo guardado: dejá todo como está realmente en la bodega. Las cajas que no cambian conservan su etiqueta."),
         h("h3", {}, grande ? "¿Cuántas cajas hay de cada lote?" : "¿Cuántas unidades hay de cada lote?"),
         campos.elemento, codigoCaja?.elemento, total, problema,
         h("div", { class: "fila" }, guardar,
@@ -3261,7 +3329,8 @@ async function vistaConteo({ bodega = null, itemCode = null, editar: editarAlAbr
     const operacion = operacionesNoHay.get(producto.itemCode) ?? crearOperacion();
     operacionesNoHay.set(producto.itemCode, operacion);
     try {
-      await api.sinExistencia(producto.itemCode, operacion.para({ bodega }));
+      if (extra) await api.guardarConteoAlmacen(almacen, producto.itemCode, operacion.para(grande ? { grupos: [], bulto: null } : { lotes: [] }));
+      else await api.sinExistencia(producto.itemCode, operacion.para({ bodega }));
       operacion.terminar();
       operacionesNoHay.delete(producto.itemCode);
       await siguiente(producto, `${producto.itemName}: no hay en ${corto}.`);
@@ -3285,8 +3354,10 @@ async function vistaConteo({ bodega = null, itemCode = null, editar: editarAlAbr
 
   mostrarInventario(volverInventario(),
     h("div", { class: "encabezado" }, h("div", {}, h("h1", {}, `Contar ${corto}`),
-      h("p", { class: "encabezado__sub" }, bodegaNombre(bodega), " · ", grande ? "cajas de cada lote; lo suelto, como un bulto" : "unidades sueltas de cada lote")),
-      boton("", grande ? "capas" : "caja", `Contar ${bodegaNombre(otra, { corto: true })}`, { onclick: () => vistaConteo({ bodega: otra }) })),
+      h("p", { class: "encabezado__sub" }, extra ? `${extra.almacen} · ${extra.nombre}` : bodegaNombre(bodega), " · ",
+        grande ? "cajas de cada lote; lo suelto, como un bulto" : "unidades sueltas de cada lote", extra ? " · solo conteo" : "")),
+      extra ? boton("", "volver", "Elegir otra bodega", { onclick: () => elegirConteo() })
+        : boton("", grande ? "capas" : "caja", `Contar ${bodegaNombre(otra, { corto: true })}`, { onclick: () => vistaConteo({ bodega: otra }) })),
     h("div", { class: "conteo__barra" }, avance, cola),
     lector.seccion, mensaje,
     h("div", { class: "conteo-layout" }, panel,
@@ -3345,13 +3416,48 @@ async function panelAlmacenes(panel) {
       guardar.disabled = !cambiado();
     });
   }
+  // Almacenes solo para contar (por ejemplo la 03 y la 04): no se marcan como de esta bodega, así no entran en la
+  // comparación de la 01 y la 02; se cuentan y se comparan aparte, cada uno contra lo que SAP tiene en él.
+  const conteoOriginal = JSON.stringify(datos.soloConteo ?? []);
+  let soloConteo = (datos.soloConteo ?? []).map((a) => ({ ...a }));
+  const listaConteo = h("div", { class: "solo-conteo" });
+  const libres = (actual = null) => datos.almacenes.map((a) => a.warehouseCode)
+    .filter((c) => !marcados.has(c) && (c === actual || !soloConteo.some((x) => x.almacen === c))).sort();
+  const agregarConteo = boton("", "mas", "Agregar un almacén para contar", { onclick: () => {
+    const libre = libres()[0];
+    if (!libre) return;
+    soloConteo.push({ almacen: libre, tipo: "sueltas" });
+    pintarConteo();
+    guardar.disabled = !cambiado();
+    listaConteo.querySelector(".solo-conteo__fila:last-child select")?.focus();
+  } });
+  function pintarConteo() {
+    soloConteo = soloConteo.filter((a) => !marcados.has(a.almacen));
+    poner(listaConteo, soloConteo.length ? soloConteo.map((a, i) => {
+      const almacen = h("select", { id: `conteo-almacen-${i}`, class: "campo", onchange: (evento) => {
+        a.almacen = evento.target.value; pintarConteo(); guardar.disabled = !cambiado();
+      } }, libres(a.almacen).map((c) => h("option", { value: c }, `${c} · ${nombreAlmacen(c)}`)));
+      almacen.value = a.almacen;
+      const tipo = h("select", { id: `conteo-tipo-${i}`, class: "campo", onchange: (evento) => { a.tipo = evento.target.value; guardar.disabled = !cambiado(); } },
+        h("option", { value: "cajas" }, "Por cajas, como la 01"),
+        h("option", { value: "sueltas" }, "Sueltas por lote, como la 02"));
+      tipo.value = a.tipo;
+      return h("div", { class: "rejilla-campos solo-conteo__fila" },
+        h("label", { class: "campo-etiqueta", for: almacen.id }, h("span", {}, "Almacén"), almacen),
+        h("label", { class: "campo-etiqueta", for: tipo.id }, h("span", {}, "Cómo se cuenta"), tipo),
+        boton("solo-conteo__quitar", "borrar", "Quitar", { "aria-label": `Quitar la ${a.almacen} de los almacenes para contar`,
+          onclick: () => { soloConteo.splice(i, 1); pintarConteo(); guardar.disabled = !cambiado(); } }));
+    }) : h("p", { class: "suave" }, "Ninguno."));
+    agregarConteo.disabled = !libres().length || soloConteo.length >= 10;
+  }
   const cuerpo = h("tbody");
   const guardar = boton("boton--principal", "completa", "Guardar", { disabled: true });
   const mostrarTodos = boton("", null, "", { onclick: () => { todos = !todos; pintar(); } });
   const conDatos = (a) => a.productos > 0 || a.lineasAbiertas > 0 || original.has(a.warehouseCode);
   const ocultos = datos.almacenes.filter((a) => !conDatos(a)).length;
   const cambiado = () => filtrar.checked !== datos.pedidosSoloDeEstaBodega || marcados.size !== original.size || [...marcados].some((c) => !original.has(c))
-    || vigente(asignado.grande) !== (datos.almacenGrande ?? null) || vigente(asignado.pequena) !== (datos.almacenPequena ?? null);
+    || vigente(asignado.grande) !== (datos.almacenGrande ?? null) || vigente(asignado.pequena) !== (datos.almacenPequena ?? null)
+    || JSON.stringify(soloConteo) !== conteoOriginal;
   function pintar() {
     const visibles = datos.almacenes.filter((a) => todos || conDatos(a) || marcados.has(a.warehouseCode));
     cuerpo.replaceChildren(...visibles.map((a) => {
@@ -3359,6 +3465,7 @@ async function panelAlmacenes(panel) {
       const casilla = h("input", { id, type: "checkbox", checked: marcados.has(a.warehouseCode), onchange: (evento) => {
         if (evento.target.checked) marcados.add(a.warehouseCode); else marcados.delete(a.warehouseCode);
         pintarBodegas();
+        pintarConteo();
         guardar.disabled = !cambiado();
         evento.target.closest("tr").classList.toggle("fila--marcada", evento.target.checked);
       } });
@@ -3380,7 +3487,8 @@ async function panelAlmacenes(panel) {
   guardar.addEventListener("click", async () => {
     guardar.disabled = true;
     try {
-      await api.elegirAlmacenes([...marcados], filtrar.checked, { almacenGrande: vigente(asignado.grande), almacenPequena: vigente(asignado.pequena) });
+      await api.elegirAlmacenes([...marcados], filtrar.checked, { almacenGrande: vigente(asignado.grande), almacenPequena: vigente(asignado.pequena),
+        soloConteo: soloConteo.map(({ almacen, tipo }) => ({ almacen, tipo })) });
       panel.avisar("ok", marcados.size ? `Listo: el inventario compara contra ${numero(marcados.size)} ${marcados.size === 1 ? "almacén" : "almacenes"} de SAP.`
         : "Listo: no hay almacenes elegidos; el inventario no se compara con SAP.");
       await panel.refrescar();
@@ -3402,11 +3510,15 @@ async function panelAlmacenes(panel) {
       h("div", { class: "rejilla-campos" },
         h("label", { class: "campo-etiqueta", for: "almacen-grande" }, h("span", {}, "Bodega de cajas completas"), selectores.grande),
         h("label", { class: "campo-etiqueta", for: "almacen-pequena" }, h("span", {}, "Bodega de despacho (de donde salen los pedidos)"), selectores.pequena))),
+    h("fieldset", { class: "tarjeta bodegas-almacen" }, h("legend", {}, "Almacenes solo para contar"),
+      h("p", { class: "suave" }, "Por ejemplo la 03 y la 04: se cuentan y se comparan con lo que SAP tiene en cada uno, pero no se reciben ni se mueven cosas y no entran en Pendientes ni en los pedidos. No los marques arriba."),
+      listaConteo, agregarConteo),
     h("label", { class: "opcion tarjeta opcion--tarjeta", for: "almacenes-filtrar" }, filtrar, "En Pedidos, mostrar solo los pedidos que salen de los almacenes marcados"),
     h("div", { class: "fila" }, guardar),
     h("p", { class: "suave panel__nota" }, "Los nombres y cantidades salen de SAP (solo lectura). Cambiar la selección no mueve mercadería: solo cambia contra qué se compara el inventario."));
   pintar();
   pintarBodegas();
+  pintarConteo();
 }
 
 // Registrar un código de barras que SAP no tiene: se escanea el envase y se elige el producto. Resuelve lo
