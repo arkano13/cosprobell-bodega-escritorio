@@ -7,6 +7,7 @@ import { ESTADOS, TEXTO_SIN_COMPARACION, armarAsignaciones, armarConteo, armarCo
   cantidadMovimiento, diasParaVencer, esCodigoCaja, pareceCodigoBarras, estadoFila, estadoSap, filtrosBodega, filtrosExistencias, finDeMes, nombreBodega, nombreOpcion, opcionesDescuento,
   pasosPuestaEnMarcha, quien, filasTraspaso, resumenTraspaso, cajasDeLaGrande, cajasEscaneadas, lotesParaEscanear, venceDespues, resumenRecepcion, revisarDespacho, sugerirAsignacion, textoAsignacion, textoContado, textoDocumento, textoEstado, textoLoteBodega,
   textoMovimiento, textoPorVencer, textoVencimiento, unidadesPorProducto } from "./inventario.js";
+import { conSigno, destacadosCuadre, nombreArchivoCuadre, notaCuadre, porcentaje, unidadesConSigno } from "./reportes.js";
 import { crearOperacion } from "./operaciones.js";
 import { barras } from "./code128.js";
 
@@ -927,7 +928,7 @@ function vistaResumen(sesion, pedido, volver = { texto: "Volver a pedidos", acci
 }
 
 // ---------------------------------------------------------------------------
-// Panel del supervisor: etiquetas, operadores, revisiones y sincronización
+// Panel del supervisor: etiquetas, operadores, revisiones, sincronización, almacenes y reportes
 // ---------------------------------------------------------------------------
 
 const numero = (valor) => Number(valor).toLocaleString("es-HN");
@@ -969,6 +970,7 @@ const PESTANAS = [
   { id: "revisiones", icono: "alerta", texto: "Revisiones", contar: (r) => r.revisiones.enRevision + r.revisiones.conDiferencias + r.revisiones.sinEntrega },
   { id: "sincronizacion", icono: "sincronizar", texto: "Sincronización" },
   { id: "almacenes", icono: "bodega", texto: "Almacenes", contar: (r) => (r.almacenes?.elegidos === 0 ? 1 : 0) },
+  { id: "reportes", icono: "lista", texto: "Reportes" },
 ];
 
 async function vistaSupervisor(pestana = "etiquetas") {
@@ -1005,7 +1007,7 @@ async function vistaSupervisor(pestana = "etiquetas") {
     h("div", { class: "encabezado" }, h("h1", {}, "Panel del supervisor")), nav, mensaje, contenido);
   await panel.refrescar();
   const secciones = { etiquetas: panelEtiquetas, operadores: panelOperadores, revisiones: panelRevisiones, sincronizacion: panelSincronizacion,
-    almacenes: panelAlmacenes };
+    almacenes: panelAlmacenes, reportes: panelReportes };
   await secciones[pestana](panel);
 }
 
@@ -1280,6 +1282,97 @@ async function panelSincronizacion(panel) {
           h("td", {}, insignia(INSIGNIAS[s.tipo][0], INSIGNIAS[s.tipo][1], s.texto)));
       }))),
     h("p", { class: "suave panel__nota" }, `${datos.empresa ? `Sociedad de SAP: ${datos.empresa}. ` : ""}Aviso si los pedidos pasan más de 1 hora sin datos, y el resto más de 24 horas. Los límites se ajustan cuando se definan las frecuencias del puente.`));
+}
+
+// Reportes: cuadre con SAP de lo ya contado, en pantalla y en PDF.
+async function panelReportes(panel) {
+  let r;
+  try { r = (await api.reporteCuadre()).data; } catch (error) {
+    panel.contenido.replaceChildren();
+    if (["ALMACENES_SIN_ELEGIR", "BODEGAS_SIN_ALMACEN"].includes(error?.codigo)) return panel.contenido.replaceChildren(aviso("alerta", error.mensaje),
+      boton("", "bodega", "Ir a Almacenes", { onclick: () => vistaSupervisor("almacenes") }));
+    return panel.fallo(error, () => vistaSupervisor("reportes"));
+  }
+  recordarBodegas(r.bodegas);
+  const descargar = boton("boton--principal", "impresora", "Descargar PDF", { onclick: async () => {
+    panel.avisar(null, "");
+    descargar.disabled = true;
+    const resultado = await guardarCuadrePdf(r);
+    descargar.disabled = false;
+    if (resultado.ok) panel.avisar("ok", `Reporte guardado: ${resultado.archivo}`);
+    else if (resultado.motivo === "ocupado") panel.avisar("error", "No se pudo guardar: el archivo está abierto en otro programa. Cerralo o elegí otro nombre.");
+    else if (!resultado.cancelado) panel.avisar("error", "No se pudo guardar el PDF. Probá de nuevo.");
+  } });
+  if (!window.escritorio?.guardarPdf) descargar.hidden = true;
+  panel.contenido.replaceChildren(
+    h("div", { class: "reporte__encabezado" },
+      h("div", {}, h("h2", {}, "Cuadre con SAP"), h("p", { class: "suave" }, textoMomentoCuadre(r))),
+      h("div", { class: "fila" }, boton("", "actualizar", "Actualizar", { onclick: () => vistaSupervisor("reportes") }), descargar)),
+    ...contenidoCuadre(r));
+}
+
+const textoMomentoCuadre = (r) => `Generado el ${fechaHora(r.generadoEn)}${r.existenciasSapAl ? ` · existencias de SAP del ${fechaHora(r.existenciasSapAl)}` : ""}`;
+
+// El mismo contenido en pantalla y en el PDF (la hoja de estilos lo acomoda para imprimir).
+function contenidoCuadre(r) {
+  const { resumen } = r;
+  const corto = (bodega) => bodegaNombre(bodega, { corto: true });
+  const cifra = (tipo, valor, texto, detalle) => h("div", { class: `reporte-cifra reporte-cifra--${tipo}` },
+    h("strong", {}, numero(valor)), h("span", { class: "reporte-cifra__texto" }, texto), h("span", { class: "suave" }, detalle));
+  const seccion = (tipo, titulo, lista, bajada) => h("section", { class: `reporte-seccion reporte-seccion--${tipo}` },
+    h("h3", {}, `${titulo} · ${numero(lista.length)} ${lista.length === 1 ? "producto" : "productos"}`),
+    h("p", { class: "suave" }, bajada),
+    lista.length ? tablaCuadre(lista) : h("p", { class: "reporte-vacio" }, "Ninguno."));
+  return [
+    h("div", { class: "reporte-cifras" },
+      cifra("ok", resumen.cuadran, "Cuadran", `${porcentaje(resumen.cuadran, resumen.contados)} % de los ${numero(resumen.contados)} contados`),
+      cifra("menos", resumen.menos.productos, "Con menos que SAP", unidadesConSigno(resumen.menos.unidades)),
+      cifra("mas", resumen.mas.productos, "Con más que SAP", unidadesConSigno(resumen.mas.unidades))),
+    h("ul", { class: "reporte-destacados" }, destacadosCuadre(r, { grande: corto("grande"), pequena: corto("pequena") }).map((t) => h("li", {}, t))),
+    h("p", { class: "reporte-lectura" }, h("strong", {}, "Cómo leer las tablas: "),
+      `todo está en unidades. Diferencia = contado − SAP: negativa (en rojo), en la bodega hay menos que en SAP; positiva (en naranja), hay más. `,
+      `${conMayuscula(corto("pequena"))} cuenta lo preparado en pedidos sin entregar en SAP.`),
+    seccion("menos", "Con menos que SAP", r.menos, "De mayor a menor faltante. En Pendientes aparecen como Falta guardar."),
+    seccion("mas", "Con más que SAP", r.mas, "De mayor a menor sobrante. En Pendientes aparecen como Falta marcar salida."),
+    h("p", { class: "suave reporte-nota" }, notaCuadre(resumen)),
+  ];
+}
+
+function tablaCuadre(lista) {
+  const dif = (n, total = false) => h("td", { class: `tabla__numero dif dif--${n < 0 ? "menos" : n > 0 ? "mas" : "cero"}${total ? " dif--total" : ""}` }, conSigno(n));
+  const num = (n, extra = "") => h("td", { class: `tabla__numero${extra}` }, numero(n));
+  const grupo = (bodega) => h("th", { scope: "colgroup", colspan: "3", class: "tabla-cuadre__grupo" }, bodegaNombre(bodega, { corto: true }).replace(/^la /, "Bodega "));
+  return h("div", { class: "tabla-envoltura" }, h("table", { class: "tabla tabla-cuadre" },
+    h("thead", {},
+      h("tr", {}, h("th", { colspan: "2" }), grupo("grande"), grupo("pequena"), h("th")),
+      h("tr", {}, ["Código", "Producto", "Contado", "SAP", "Dif.", "Contado", "SAP", "Dif.", "Total"].map((t, i) =>
+        h("th", { scope: "col", class: i >= 2 ? "tabla__numero" : null }, t)))),
+    h("tbody", {}, lista.map((x) => h("tr", {},
+      h("td", { class: "codigo" }, x.itemCode), h("th", { scope: "row" }, x.itemName),
+      num(x.grande.contado), num(x.grande.sap, " suave"), dif(x.grande.diferencia),
+      h("td", { class: "tabla__numero" }, numero(x.pequena.contado), x.pequena.sinEntrega ? h("small", { class: "suave" }, ` +${numero(x.pequena.sinEntrega)} sin entregar`) : ""),
+      num(x.pequena.sap, " suave"), dif(x.pequena.diferencia), dif(x.diferencia, true))))));
+}
+
+// Arma la hoja del PDF en la zona de impresión y la guarda (la app pregunta dónde).
+async function guardarCuadrePdf(r) {
+  const hoja = h("div", { class: "hoja-reporte" },
+    h("header", { class: "hoja-reporte__portada" },
+      h("p", { class: "hoja-reporte__marca" }, "Bodega · Conteo físico"),
+      h("h1", {}, "Cuadre de inventario"),
+      h("p", { class: "hoja-reporte__sub" }, "Productos ya contados: qué cuadró con SAP, qué tiene menos y qué tiene más"),
+      h("p", { class: "hoja-reporte__fecha" }, `${textoMomentoCuadre(r)} · ${bodegaNombre("grande")} y ${bodegaNombre("pequena")}`)),
+    ...contenidoCuadre(r));
+  const zona = zonaImpresion();
+  zona.replaceChildren(hoja);
+  try {
+    await document.fonts.ready;
+    return await window.escritorio.guardarPdf({ nombre: nombreArchivoCuadre(r.generadoEn), pie: `Bodega Cosprobell · Cuadre con SAP · ${fechaHora(r.generadoEn)}` });
+  } catch {
+    return { ok: false, motivo: "error" };
+  } finally {
+    zona.replaceChildren();
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -2537,9 +2630,13 @@ function codigoBarras(texto) {
 
 // Imprime solo las etiquetas: se dibujan en una zona que la hoja de estilos muestra únicamente al imprimir.
 const imprimirEtiquetas = (cajas, producto) => imprimirZona(cajas.map((c, i) => etiquetaCaja(c, producto, cajas.length > 1 ? { numero: i + 1, de: cajas.length } : null)));
-async function imprimirZona(etiquetas) {
+function zonaImpresion() {
   let zona = document.getElementById("impresion");
   if (!zona) { zona = h("div", { id: "impresion", class: "impresion", "aria-hidden": "true" }); document.body.append(zona); }
+  return zona;
+}
+async function imprimirZona(etiquetas) {
+  const zona = zonaImpresion();
   zona.replaceChildren(...etiquetas);
   try {
     if (window.escritorio?.imprimir) return await window.escritorio.imprimir();

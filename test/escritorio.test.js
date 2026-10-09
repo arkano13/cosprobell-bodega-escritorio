@@ -7,6 +7,7 @@ import { ORIGEN, politicaContenido, cabeceras, resolverArchivo } from "../src/ar
 import { SERVIDOR_PRODUCCION, elegirServidor } from "../src/servidor.js";
 import { crearIngreso, datosIngresoValidos, leerClaveIngreso } from "../src/ingreso.js";
 import { PREFERENCIAS_INICIALES, crearPreferencias, normalizarPreferencias } from "../src/preferencias.js";
+import { guardarPdf, nombreSeguro, piePagina } from "../src/pdf.js";
 
 const UI = path.resolve("ui");
 
@@ -119,4 +120,36 @@ test("ingreso: solo se reenvían un operador y un PIN de 4 números", () => {
   assert.equal(datosIngresoValidos({ operadorId: 7, pin: "4827" }), true);
   for (const malo of [{ operadorId: "7", pin: "4827" }, { operadorId: 0, pin: "4827" }, { operadorId: 7, pin: "482" },
     { operadorId: 7, pin: 4827 }, { operadorId: 7, pin: "48a7" }, undefined]) assert.equal(datosIngresoValidos(malo), false, JSON.stringify(malo));
+});
+
+test("pdf: nombre del archivo sin carpetas ni caracteres raros y pie escapado", () => {
+  assert.equal(nombreSeguro("Cuadre-SAP-2026-10-09-1507.pdf"), "Cuadre-SAP-2026-10-09-1507.pdf");
+  assert.equal(nombreSeguro("../../Windows/evil.exe"), "evil.exe.pdf");
+  assert.equal(nombreSeguro("C:\\x\\reporte"), "reporte.pdf");
+  assert.equal(nombreSeguro("..."), "Reporte.pdf");
+  assert.equal(nombreSeguro(null), "Reporte.pdf");
+  const pie = piePagina('Cuadre <img src=x onerror="alert(1)">');
+  assert.doesNotMatch(pie, /<img/);
+  assert.match(pie, /Cuadre &lt;img src=x onerror=&quot;alert\(1\)&quot;&gt;/);
+  assert.match(pie, /class="pageNumber"/);
+});
+
+test("pdf: pregunta dónde guardar, escribe el PDF de la ventana y lo abre; cancelar no hace nada", async () => {
+  const escritos = [], abiertos = [], opciones = [];
+  const contenido = { printToPDF: async (o) => { opciones.push(o); return Buffer.from("%PDF"); } };
+  const comun = { contenido, carpeta: path.join("C:", "Documentos"), escribir: async (r, pdf) => escritos.push([r, String(pdf)]), abrir: async (r) => abiertos.push(r) };
+  const sugeridas = [];
+  const r = await guardarPdf({ ...comun, datos: { nombre: "Cuadre.pdf", pie: "Bodega" }, elegirArchivo: async (s) => { sugeridas.push(s); return path.join("D:", "Cuadre.pdf"); } });
+  assert.deepEqual(r, { ok: true, archivo: "Cuadre.pdf" });
+  assert.deepEqual(sugeridas, [path.join("C:", "Documentos", "Cuadre.pdf")]);
+  assert.deepEqual(escritos, [[path.join("D:", "Cuadre.pdf"), "%PDF"]]);
+  assert.deepEqual(abiertos, [path.join("D:", "Cuadre.pdf")]);
+  assert.equal(opciones[0].preferCSSPageSize, true);
+  assert.equal(opciones[0].printBackground, true);
+  assert.deepEqual(await guardarPdf({ ...comun, datos: {}, elegirArchivo: async () => null }), { ok: false, cancelado: true });
+  assert.equal(escritos.length, 1);
+  const ocupado = await guardarPdf({ ...comun, datos: {}, elegirArchivo: async (s) => s,
+    escribir: async () => { throw Object.assign(new Error("ocupado"), { code: "EBUSY" }); } });
+  assert.deepEqual(ocupado, { ok: false, motivo: "ocupado" });
+  assert.equal(abiertos.length, 1);
 });
