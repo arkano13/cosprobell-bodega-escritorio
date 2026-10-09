@@ -154,62 +154,79 @@ export const NOMBRES_DOCUMENTO = {
 };
 export const textoDocumento = (d) => `${NOMBRES_DOCUMENTO[d.tipo] ?? d.tipo} ${d.docNum}`;
 
-// Conteo de la bodega de cajas. filas: [{ cajas (null si está vacío), unidadesPorCaja, lote, vencimiento }]; las filas
-// sin cajas, lote ni vencimiento no cuentan. Si solo hay unidades sueltas, van como un bulto con etiqueta. Devuelve
-// { cuerpo, total, cajas, etiquetas } (cuerpo para POST /inventario/recepciones, sin itemCode) o { problema }.
-export function armarConteoCajas(filas, bulto = null) {
+// Conteo de la bodega de cajas: filas de cajas (cada una con su lote) y unidades sueltas por lote. Las filas sin cajas,
+// lote ni vencimiento no cuentan. bultos: [{ unidades, lote, vencimiento }] (lo suelto: cada lote por separado; también
+// se acepta un bulto solo o null). Devuelve { cuerpo, total, cajas, etiquetas, lotesSueltos } o { problema }. En la 01
+// todo lo suelto lleva una sola etiqueta.
+export function armarConteoCajas(filas, bultos = []) {
   const llenas = filas.filter((f) => f.cajas !== null || f.lote || f.vencimiento);
-  if (!llenas.length) {
-    if (!bulto) return { problema: "Escribí cuántas cajas hay, o tocá «No hay»." };
-    if (!Number.isInteger(bulto.unidades) || bulto.unidades < 1) return { problema: "Escribí cuántas unidades sueltas hay." };
-    return { cuerpo: { modo: "suelto", destino: "grande", unidades: bulto.unidades, lote: bulto.lote || null, vencimiento: bulto.vencimiento ?? null },
-      total: bulto.unidades, cajas: 0, etiquetas: 1 };
-  }
-  const g = armarGrupos(llenas, bulto);
+  const sueltos = listaSueltos(bultos);
+  if (!llenas.length && !sueltos.length) return { problema: "Escribí cuántas cajas hay, o tocá «No hay»." };
+  const g = armarGrupos(llenas, sueltos);
   if (g.problema) return g;
-  return { cuerpo: { modo: "grupos", grupos: g.grupos, bulto: g.bulto }, total: g.total, cajas: g.cajas, etiquetas: g.etiquetas };
+  return { cuerpo: { modo: "grupos", grupos: g.grupos, bultos: g.bultos }, total: g.total, cajas: g.cajas, etiquetas: g.etiquetas,
+    lotesSueltos: g.bultos.length };
+}
+const listaSueltos = (bultos) => (Array.isArray(bultos) ? bultos : bultos ? [bultos] : []);
+
+// Lo suelto agrupado por lote y vencimiento (sumando lo repetido), para editarlo en el formulario.
+function sueltosPorLote(lista) {
+  const porClave = new Map();
+  for (const b of lista) {
+    const clave = JSON.stringify([b.lote ?? null, b.vencimiento ?? null]);
+    if (!porClave.has(clave)) porClave.set(clave, { unidades: 0, lote: b.lote ?? null, vencimiento: b.vencimiento ?? null });
+    porClave.get(clave).unidades += b.unidades;
+  }
+  return [...porClave.values()];
 }
 
-// Lo guardado en la grande, para editar el conteo (supervisor): una fila por lote, vencimiento y unidades por caja, y
-// el bulto. lotes: los de la ficha ([{ cajas: [{ lote, vencimiento, unidades, unidadesIniciales, suelto }] }]). Solo con
-// cajas sin usar, y con un bulto como mucho (el formulario tiene uno). Devuelve { filas, bulto } o { problema }.
+// Lo guardado en la grande, para editarlo con el mismo formulario: las cajas sin usar agrupadas por lote, vencimiento y
+// unidades, y lo suelto por lote. lotes: los de la ficha ([{ cajas: [{ lote, vencimiento, unidades, unidadesIniciales,
+// suelto }] }]). Solo con cajas sin usar. Devuelve { filas, bultos } o { problema }.
 export function conteoGuardadoGrande(lotes) {
   const cajas = lotes.flatMap((l) => l.cajas ?? []).filter((c) => c.unidades > 0);
   if (cajas.some((c) => c.unidades !== c.unidadesIniciales)) {
     return { problema: "Ya se sacaron unidades de alguna caja de este producto: corregí esa caja desde el producto." };
   }
-  const bultos = cajas.filter((c) => c.suelto);
-  if (bultos.length > 1) return { problema: "Este producto tiene más de un bulto en la grande: corregí las cajas desde el producto." };
   const filas = new Map();
   for (const c of cajas.filter((c) => !c.suelto)) {
     const clave = JSON.stringify([c.lote ?? null, c.vencimiento ?? null, c.unidades]);
     if (!filas.has(clave)) filas.set(clave, { cajas: 0, unidadesPorCaja: c.unidades, lote: c.lote ?? null, vencimiento: c.vencimiento ?? null });
     filas.get(clave).cajas += 1;
   }
-  const b = bultos[0];
-  return { filas: [...filas.values()], bulto: b ? { unidades: b.unidades, lote: b.lote ?? null, vencimiento: b.vencimiento ?? null } : null };
+  return { filas: [...filas.values()], bultos: sueltosPorLote(cajas.filter((c) => c.suelto)) };
 }
 
 // Lo guardado en un almacén solo para contar por cajas, para editarlo con el mismo formulario: las líneas con cajas son
-// filas y la que no tiene cajas, el bulto. lineas: [{ lote, vencimiento, cajas, unidadesPorCaja, unidades }].
+// filas y las que no tienen cajas, lo suelto. lineas: [{ lote, vencimiento, cajas, unidadesPorCaja, unidades }].
 export function conteoGuardadoAlmacen(lineas) {
-  const bulto = lineas.find((l) => l.cajas === null) ?? null;
   return {
     filas: lineas.filter((l) => l.cajas !== null).map((l) => ({ cajas: l.cajas, unidadesPorCaja: l.unidadesPorCaja, lote: l.lote ?? null, vencimiento: l.vencimiento ?? null })),
-    bulto: bulto ? { unidades: bulto.unidades, lote: bulto.lote ?? null, vencimiento: bulto.vencimiento ?? null } : null,
+    bultos: sueltosPorLote(lineas.filter((l) => l.cajas === null)),
   };
 }
 
-// Cuerpo de la edición del conteo de la grande ({ grupos, bulto }) a partir de lo que armó armarConteoCajas.
+// Cuerpo de la edición del conteo de la grande ({ grupos, bultos }) a partir de lo que armó armarConteoCajas.
 export const cuerpoEdicionGrande = (cuerpo) => (cuerpo.modo === "suelto"
-  ? { grupos: [], bulto: { unidades: cuerpo.unidades, lote: cuerpo.lote ?? null, vencimiento: cuerpo.vencimiento ?? null } }
-  : { grupos: cuerpo.grupos, bulto: cuerpo.bulto ?? null });
+  ? { grupos: [], bultos: [{ unidades: cuerpo.unidades, lote: cuerpo.lote ?? null, vencimiento: cuerpo.vencimiento ?? null }] }
+  : { grupos: cuerpo.grupos, bultos: cuerpo.bultos ?? listaSueltos(cuerpo.bulto) });
 
-// "77 en 5 cajas y un bulto", "14 unidades".
-export function textoContado({ total, cajas = 0, etiquetas = 0 }) {
-  const bulto = etiquetas > cajas;
-  if (!cajas) return bulto ? `${unidades(total)} sueltas en un bulto` : unidades(total);
-  return `${unidades(total)} en ${numero(cajas)} ${cajas === 1 ? "caja" : "cajas"}${bulto ? " y un bulto" : ""}`;
+// "77 en 5 cajas y un bulto", "72 sueltas de 3 lotes", "14 unidades".
+export function textoContado({ total, cajas = 0, etiquetas = 0, lotesSueltos = 0 }) {
+  const bulto = etiquetas > cajas || lotesSueltos > 0;
+  const deLotes = lotesSueltos > 1 ? ` de ${numero(lotesSueltos)} lotes` : "";
+  if (!cajas) return bulto ? `${unidades(total)} sueltas${deLotes || " en un bulto"}` : unidades(total);
+  return `${unidades(total)} en ${numero(cajas)} ${cajas === 1 ? "caja" : "cajas"}${bulto ? ` y un bulto${deLotes}` : ""}`;
+}
+
+// Etiquetas a imprimir: una por caja entera y una sola para todo lo suelto del mismo producto, aunque sean varios lotes.
+// cajas: [{ codigo, suelto, ... }]. Devuelve [{ caja } | { sueltas: [cajas] }] en el orden en que llegaron.
+export function agruparEtiquetas(cajas) {
+  const sueltas = cajas.filter((c) => c.suelto);
+  const resultado = cajas.filter((c) => !c.suelto).map((caja) => ({ caja }));
+  if (sueltas.length === 1) resultado.push({ caja: sueltas[0] });
+  else if (sueltas.length > 1) resultado.push({ sueltas });
+  return resultado;
 }
 
 // Traspaso de la 01 a la 02 que SAP ya registró (SAP no tiene lotes): la bodega acepta de qué lotes salió. Una fila por
@@ -282,12 +299,12 @@ export function resumenTraspaso(elegidos, total) {
 }
 
 // Lo que entra en una recepción: total de unidades y frase para confirmar.
-// Cajas por grupos (cada grupo con su lote) y lo que sobra como un bulto en la grande. filas: [{ cajas,
-// unidadesPorCaja, lote, vencimiento }], bulto: { unidades, lote, vencimiento } o null. Devuelve el cuerpo con sus
-// totales ({ grupos, bulto, cajas, total, etiquetas }) o { problema }.
+// Cajas por grupos (cada grupo con su lote) y lo suelto por lote, en la grande. filas: [{ cajas, unidadesPorCaja, lote,
+// vencimiento }], bultos: [{ unidades, lote, vencimiento }] (o un bulto solo, o null). Devuelve el cuerpo con sus totales
+// ({ grupos, bultos, cajas, enCajas, total, etiquetas }) o { problema }. Lo suelto lleva una sola etiqueta.
 // Hasta 2000 cajas por fila (un lote) y 3000 por vez: lo mismo que acepta el servidor.
 const MAX_CAJAS_FILA = 2000, MAX_CAJAS = 3000;
-export function armarGrupos(filas, bulto = null) {
+export function armarGrupos(filas, bultos = []) {
   const grupos = [];
   for (const [i, f] of filas.entries()) {
     const cual = filas.length > 1 ? ` (fila ${i + 1})` : "";
@@ -295,23 +312,35 @@ export function armarGrupos(filas, bulto = null) {
     if (!Number.isInteger(f.unidadesPorCaja) || f.unidadesPorCaja < 1) return { problema: `Escribí cuántas unidades trae cada caja${cual}.` };
     grupos.push({ cajas: f.cajas, unidadesPorCaja: f.unidadesPorCaja, lote: f.lote || null, vencimiento: f.vencimiento ?? null });
   }
-  if (!grupos.length) return { problema: "Agregá al menos una fila de cajas." };
+  const lista = listaSueltos(bultos);
+  if (!grupos.length && !lista.length) return { problema: "Agregá al menos una fila de cajas o de unidades sueltas." };
   const cajas = grupos.reduce((t, g) => t + g.cajas, 0);
   if (cajas > MAX_CAJAS) return { problema: `Hasta ${MAX_CAJAS} cajas por vez.` };
-  if (bulto && (!Number.isInteger(bulto.unidades) || bulto.unidades < 1)) return { problema: "Escribí cuántas unidades sueltas sobraron, o dejalo vacío." };
+  const sueltos = [], vistos = new Set();
+  for (const [i, b] of lista.entries()) {
+    const cual = lista.length > 1 ? ` (suelta ${i + 1})` : "";
+    if (!Number.isInteger(b.unidades) || b.unidades < 1) return { problema: `Escribí cuántas unidades sueltas hay${cual}, o dejalo vacío.` };
+    const clave = JSON.stringify([b.lote || null, b.vencimiento ?? null]);
+    if (vistos.has(clave)) return { problema: `El lote suelto ${b.lote || "sin lote"} está repetido: sumalo en una sola fila.` };
+    vistos.add(clave);
+    sueltos.push({ unidades: b.unidades, lote: b.lote || null, vencimiento: b.vencimiento ?? null });
+  }
   const enCajas = grupos.reduce((t, g) => t + g.cajas * g.unidadesPorCaja, 0);
-  return { grupos, bulto: bulto ? { unidades: bulto.unidades, lote: bulto.lote || null, vencimiento: bulto.vencimiento ?? null } : null,
-    cajas, enCajas, total: enCajas + (bulto?.unidades ?? 0), etiquetas: cajas + (bulto ? 1 : 0) };
+  const enSueltas = sueltos.reduce((t, b) => t + b.unidades, 0);
+  return { grupos, bultos: sueltos, cajas, enCajas, total: enCajas + enSueltas, etiquetas: cajas + (sueltos.length ? 1 : 0) };
 }
 
-export function resumenRecepcion({ modo, cajas, unidadesPorCaja, unidades: sueltas, destino, lote, grupos, bulto }, bodegas = null) {
+export function resumenRecepcion({ modo, cajas, unidadesPorCaja, unidades: sueltas, destino, lote, grupos, bultos, bulto }, bodegas = null) {
   const a = (bodega) => `a ${nombreBodega(bodegas, bodega, { corto: true })}`;
   if (modo === "grupos") {
-    const r = armarGrupos(grupos ?? [], bulto ?? null);
+    const r = armarGrupos(grupos ?? [], bultos ?? bulto ?? []);
     if (r.problema) return { total: 0, texto: "" };
+    const enSueltas = r.total - r.enCajas;
+    const sueltasTexto = r.bultos.length ? `${unidades(enSueltas)} sueltas${r.bultos.length > 1 ? ` de ${numero(r.bultos.length)} lotes` : ""}, en un bulto` : "";
+    if (!r.grupos.length) return { total: r.total, texto: `Entran ${sueltasTexto} ${a("grande")}.` };
     const lotes = new Set(r.grupos.map((g) => g.lote ?? ""));
     const deLotes = lotes.size > 1 ? ` de ${numero(lotes.size)} lotes` : r.grupos[0].lote ? ` del lote ${r.grupos[0].lote}` : "";
-    const extra = r.bulto ? ` Más un bulto suelto de ${unidades(r.bulto.unidades)}.` : "";
+    const extra = sueltasTexto ? ` Más ${sueltasTexto}.` : "";
     return { total: r.total, texto: `Entran ${numero(r.cajas)} ${r.cajas === 1 ? "caja" : "cajas"} · ${unidades(r.enCajas)}${deLotes} ${a("grande")}.${extra}` };
   }
   const total = modo === "cajas" ? cajas * unidadesPorCaja : sueltas;
