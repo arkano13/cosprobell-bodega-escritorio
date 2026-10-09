@@ -3,7 +3,7 @@ import { crearColaLecturas } from "./lecturas.js";
 import { icono } from "./iconos.js";
 import { HORAS_EN_LISTA, sigueEnLista, textosPreparado } from "./preparados.js";
 import { NOMBRES_DATOS, estadoDatos, estadoOperador, puedeSerUnidad, quienConfirmo, textoCambio, textoRevision, textoSinEntrega, textoUnidad } from "./supervisor.js";
-import { ESTADOS, TEXTO_SIN_COMPARACION, armarAsignaciones, armarConteo, armarConteoCajas, conteoGuardadoAlmacen, conteoGuardadoGrande, cuerpoEdicionGrande, armarGrupos, armarLotesDespacho, armarLotesPequena, avanceConteo,
+import { ESTADOS, TEXTO_SIN_COMPARACION, armarAsignaciones, agruparEtiquetas, armarConteo, armarConteoCajas, conteoGuardadoAlmacen, conteoGuardadoGrande, cuerpoEdicionGrande, armarGrupos, armarLotesDespacho, armarLotesPequena, avanceConteo,
   cantidadMovimiento, diasParaVencer, esCodigoCaja, pareceCodigoBarras, estadoFila, estadoSap, filtrosBodega, filtrosExistencias, finDeMes, nombreBodega, nombreOpcion, opcionesDescuento,
   pasosPuestaEnMarcha, quien, filasTraspaso, resumenTraspaso, cajasDeLaGrande, cajasEscaneadas, lotesParaEscanear, venceDespues, resumenRecepcion, revisarDespacho, sugerirAsignacion, textoAsignacion, textoContado, textoDocumento, textoEstado, textoLoteBodega,
   textoMovimiento, textoPorVencer, textoVencimiento, unidadesPorProducto } from "./inventario.js";
@@ -2417,9 +2417,9 @@ const numeroDe = (entrada) => (entrada.value === "" ? null : Number(entrada.valu
 const avisarCambio = (elemento) => elemento.dispatchEvent(new Event("input", { bubbles: true }));
 
 // Cajas por lote (bodega de cajas): una fila por lote, o por cantidad distinta dentro de un lote, y lo que sobra
-// suelto como un bulto con etiqueta. Los id llevan el prefijo: rec-cajas, rec-por-caja, rec-lote, rec-vence, rec-g1-cajas…,
-// rec-bulto, rec-bulto-lote y rec-bulto-vence. cajas: lo que trae escrito la primera fila. valores: lo ya guardado
-// ({ filas, bulto }, de conteoGuardadoGrande), para editar el conteo.
+// suelto por lote (todo en un bulto con una sola etiqueta). Los id llevan el prefijo: rec-cajas, rec-por-caja, rec-lote,
+// rec-vence, rec-g1-cajas…, y lo suelto rec-bulto, rec-bulto-lote, rec-bulto-vence, rec-s1-bulto… cajas: lo que trae
+// escrito la primera fila. valores: lo ya guardado ({ filas, bultos }, de conteoGuardadoGrande), para editar el conteo.
 function formularioCajas({ prefijo, sugerencia = null, cajas = "1", valores = null, conEtiquetas = true }) {
   const filas = [];
   const lista = h("ol", { class: "grupos-cajas" });
@@ -2443,27 +2443,49 @@ function formularioCajas({ prefijo, sugerencia = null, cajas = "1", valores = nu
     const f = agregar();
     if (v) { f.cajas.value = String(v.cajas); f.porCaja.value = String(v.unidadesPorCaja); f.lote.value = v.lote ?? ""; ponerMes(f.vence, v.vencimiento); }
   }
-  const bulto = { unidades: h("input", { id: `${prefijo}-bulto`, class: "campo campo--numero", type: "number", min: "1", inputmode: "numeric", placeholder: "0" }),
-    lote: textoCampo(`${prefijo}-bulto-lote`), vence: mesCampo(`${prefijo}-bulto-vence`) };
-  if (valores?.bulto) { bulto.unidades.value = String(valores.bulto.unidades); bulto.lote.value = valores.bulto.lote ?? ""; ponerMes(bulto.vence, valores.bulto.vencimiento); }
+  // Unidades sueltas, una fila por lote (por ejemplo una caja de tintes con varios colores y lotes mezclados).
+  const sueltas = [];
+  const listaSueltas = h("ol", { class: "grupos-cajas grupos-sueltas" });
+  let siguienteSuelta = 0;
+  function agregarSuelta() {
+    const n = siguienteSuelta++;
+    const id = (nombre) => (n === 0 ? `${prefijo}-bulto${nombre}` : `${prefijo}-s${n}-bulto${nombre}`);
+    const f = { unidades: h("input", { id: id(""), class: "campo campo--numero", type: "number", min: "1", inputmode: "numeric", placeholder: "0" }),
+      lote: textoCampo(id("-lote")), vence: mesCampo(id("-vence")) };
+    f.elemento = h("li", { class: "grupo-cajas grupo-lotes" },
+      campoCon(id(""), "Unidades", f.unidades), campoCon(id("-lote"), "Lote", f.lote), campoCon(id("-vence"), "Vence", f.vence),
+      n > 0 && boton("grupo-cajas__quitar", "borrar", "Quitar", { "aria-label": `Quitar las sueltas de la fila ${sueltas.length + 1}`,
+        onclick: () => { sueltas.splice(sueltas.indexOf(f), 1); f.elemento.remove(); avisarCambio(listaSueltas); sueltas.at(-1).unidades.focus(); } }));
+    sueltas.push(f);
+    listaSueltas.append(f.elemento);
+    return f;
+  }
+  const guardadas = valores?.bultos ?? (valores?.bulto ? [valores.bulto] : []);
+  for (const v of guardadas.length ? guardadas : [null]) {
+    const f = agregarSuelta();
+    if (v) { f.unidades.value = String(v.unidades); f.lote.value = v.lote ?? ""; ponerMes(f.vence, v.vencimiento); }
+  }
   const elemento = h("div", {},
     h("p", { class: "suave" }, "Una fila por cada lote. Si dentro de un lote hay cajas con distinta cantidad, poné una fila por cada cantidad.",
       sugerencia ? ` La última vez vino en cajas de ${numero(sugerencia.unidadesPorCaja)}.` : ""),
     lista,
     boton("", "mas", "Agregar otro lote", { onclick: () => { agregar().cajas.focus(); avisarCambio(lista); } }),
-    h("fieldset", { class: "bulto" }, h("legend", {}, "¿Sobraron unidades sueltas?"),
-      h("p", { class: "suave" }, conEtiquetas ? "Quedan en la misma bodega como un bulto con su etiqueta. Si no sobró nada, dejalo vacío."
-        : "Se cuentan aparte, como un bulto. Si no sobró nada, dejalo vacío."),
-      h("div", { class: "rejilla-campos" }, campoCon(`${prefijo}-bulto`, "Unidades", bulto.unidades), campoCon(`${prefijo}-bulto-lote`, "Lote", bulto.lote),
-        campoCon(`${prefijo}-bulto-vence`, "Vence", bulto.vence))));
+    h("fieldset", { class: "bulto" }, h("legend", {}, "¿Hay unidades sueltas?"),
+      h("p", { class: "suave" }, conEtiquetas
+        ? "Lo que no está en cajas enteras (por ejemplo una caja con varios colores mezclados): una fila por cada lote. Todo lo suelto lleva una sola etiqueta. Si no hay, dejalo vacío."
+        : "Lo que no está en cajas enteras (por ejemplo una caja con varios colores mezclados): una fila por cada lote. Si no hay, dejalo vacío."),
+      listaSueltas,
+      boton("", "mas", "Agregar otro lote suelto", { onclick: () => { agregarSuelta().unidades.focus(); avisarCambio(listaSueltas); } })));
+  const leerSueltas = () => sueltas.filter((f) => f.unidades.value !== "" || f.lote.value.trim() || f.vence.value)
+    .map((f) => ({ unidades: f.unidades.value === "" ? null : Number(f.unidades.value), lote: f.lote.value.trim() || null, vencimiento: mesGuardado(f.vence) }));
   return {
     elemento,
-    // { filas: [{ cajas, unidadesPorCaja, lote, vencimiento }], bulto } con null en lo que está vacío.
+    // { filas: [{ cajas, unidadesPorCaja, lote, vencimiento }], bultos: [{ unidades, lote, vencimiento }] } con null en lo que está vacío.
     leer: () => ({
       filas: filas.map((f) => ({ cajas: numeroDe(f.cajas), unidadesPorCaja: numeroDe(f.porCaja), lote: f.lote.value.trim() || null, vencimiento: mesGuardado(f.vence) })),
-      bulto: bulto.unidades.value === "" ? null : { unidades: Number(bulto.unidades.value), lote: bulto.lote.value.trim() || null, vencimiento: mesGuardado(bulto.vence) },
+      bultos: leerSueltas(),
     }),
-    meses: () => [...filas.map((f) => f.vence), bulto.vence],
+    meses: () => [...filas.map((f) => f.vence), ...sueltas.map((f) => f.vence)],
     enfocar: () => filas[0].cajas.focus(),
   };
 }
@@ -2537,8 +2559,8 @@ async function vistaRecibir(itemCode) {
 
   function leer() {
     if (modo === "cajas") {
-      const { filas, bulto } = cajas.leer();
-      return { modo: "grupos", grupos: filas, bulto };
+      const { filas, bultos } = cajas.leer();
+      return { modo: "grupos", grupos: filas.filter((f) => f.cajas !== null || f.lote || f.vencimiento), bultos };
     }
     return { modo: "suelto", unidades: Number(sueltas.value), destino: aPequena.checked ? "pequena" : "grande",
       lote: sueltoLote.value.trim() || null, vencimiento: mes(sueltoVence) };
@@ -2549,7 +2571,7 @@ async function vistaRecibir(itemCode) {
     grupoCajas.hidden = modo !== "cajas"; grupoSuelto.hidden = modo !== "suelto";
     const d = leer();
     const r = resumenRecepcion(d, estado.bodegas);
-    const g = d.modo === "grupos" ? armarGrupos(d.grupos, d.bulto) : null;
+    const g = d.modo === "grupos" ? armarGrupos(d.grupos, d.bultos) : null;
     const etiquetas = g ? (g.problema ? 0 : g.etiquetas) : d.destino === "grande" ? 1 : 0;
     guardar.replaceChildren(icono(etiquetas ? "impresora" : "completa"),
       etiquetas ? `Guardar e imprimir ${numero(etiquetas)} ${etiquetas === 1 ? "etiqueta" : "etiquetas"}` : "Guardar");
@@ -2567,9 +2589,9 @@ async function vistaRecibir(itemCode) {
     const d = leer();
     let cuerpo;
     if (d.modo === "grupos") {
-      const g = armarGrupos(d.grupos, d.bulto);
+      const g = armarGrupos(d.grupos, d.bultos);
       if (g.problema) { textoAviso(problema, g.problema); problema.hidden = false; return; }
-      cuerpo = { itemCode, modo: "grupos", grupos: g.grupos, bulto: g.bulto, adelantar };
+      cuerpo = { itemCode, modo: "grupos", grupos: g.grupos, bultos: g.bultos, adelantar };
     } else {
       if (!enteroPositivo(d.unidades)) { textoAviso(problema, "Escribí cuántas unidades llegaron."); problema.hidden = false; return; }
       cuerpo = { itemCode, modo: "suelto", unidades: d.unidades, destino: d.destino, lote: d.lote, vencimiento: d.vencimiento, adelantar };
@@ -2615,7 +2637,11 @@ async function vistaRecibir(itemCode) {
 function vistaEtiquetas(cajas, producto) {
   const rango = cajas.length === 1 ? cajas[0].codigo : `${cajas[0].codigo} a ${cajas.at(-1).codigo}`;
   const resultado = h("div", { "aria-live": "polite" });
-  const texto = `Imprimir ${numero(cajas.length)} ${cajas.length === 1 ? "etiqueta" : "etiquetas"}`;
+  const cantidad = agruparEtiquetas(cajas).length;
+  const enteras = cajas.filter((c) => !c.suelto).length, sueltas = cajas.length - enteras;
+  const registrado = [enteras && `${numero(enteras)} ${enteras === 1 ? "caja" : "cajas"}`,
+    sueltas && (sueltas === 1 ? "1 bulto suelto" : `lo suelto de ${numero(sueltas)} lotes`)].filter(Boolean).join(" y ");
+  const texto = `Imprimir ${numero(cantidad)} ${cantidad === 1 ? "etiqueta" : "etiquetas"}`;
   const imprimir = boton("boton--principal boton--grande", "impresora", texto, { onclick: async () => {
     imprimir.disabled = true;
     const r = await imprimirEtiquetas(cajas, producto);
@@ -2625,13 +2651,45 @@ function vistaEtiquetas(cajas, producto) {
   } });
   mostrarInventario(
     h("div", { class: "encabezado" }, h("div", {}, h("h1", {}, "Etiquetas de las cajas"), h("p", { class: "encabezado__sub" }, producto.itemName))),
-    aviso("ok", `Se registraron ${numero(cajas.length)} ${cajas.length === 1 ? "caja" : "cajas"} (${rango}) en ${bodegaNombre("grande", { corto: true })}. Pegá cada etiqueta en su caja.`),
+    aviso("ok", `Se registr${registrado.startsWith("1 ") ? "ó" : "aron"} ${registrado} (${rango}) en ${bodegaNombre("grande", { corto: true })}. Pegá cada etiqueta en su caja${sueltas > 1 ? "; lo suelto lleva una sola" : ""}.`),
     h("div", { class: "fila" }, imprimir,
       boton("", "siguiente", "Ver el producto", { onclick: () => vistaProducto(producto.itemCode) }),
       boton("", "bodega", "Volver al inventario", { onclick: () => vistaInventario() })),
     resultado,
-    h("div", { class: "etiquetas" }, cajas.map((c, i) => etiquetaCaja(c, producto, { numero: i + 1, de: cajas.length }))));
+    h("div", { class: "etiquetas" }, etiquetasDeCajas(cajas, producto)));
   imprimir.focus();
+}
+
+// La cola de etiquetas ([{ caja, producto }]), producto por producto: lo suelto de cada uno va en una sola etiqueta.
+function etiquetasDeCola(pendientes) {
+  const porProducto = new Map();
+  for (const { caja, producto } of pendientes) {
+    if (!porProducto.has(producto.itemCode)) porProducto.set(producto.itemCode, { producto, cajas: [] });
+    porProducto.get(producto.itemCode).cajas.push(caja);
+  }
+  return [...porProducto.values()].flatMap(({ producto, cajas }) => etiquetasDeCajas(cajas, producto));
+}
+
+// Las etiquetas de lo registrado: una por caja entera y una sola para todo lo suelto (aunque sean varios lotes).
+function etiquetasDeCajas(cajas, producto) {
+  const grupos = agruparEtiquetas(cajas);
+  const enteras = grupos.filter((g) => g.caja && !g.caja.suelto).length;
+  let n = 0;
+  return grupos.map((g) => (g.sueltas ? etiquetaSueltas(g.sueltas, producto)
+    : etiquetaCaja(g.caja, producto, grupos.length > 1 && !g.caja.suelto ? { numero: ++n, de: enteras } : null)));
+}
+
+// Etiqueta de lo suelto de varios lotes: cada lote con sus unidades, vencimiento y su código (cada lote queda registrado
+// aparte). Sin código de barras: escanearlo abriría un solo lote.
+function etiquetaSueltas(sueltas, producto) {
+  const fila = (rotulo, valor) => h("div", { class: "etiqueta__fila" }, h("span", { class: "etiqueta__rotulo" }, rotulo), h("span", {}, valor));
+  const total = sueltas.reduce((t, c) => t + c.unidadesIniciales, 0);
+  return h("article", { class: "etiqueta-caja etiqueta-sueltas", "aria-label": `Etiqueta de las sueltas de ${producto.itemName}` },
+    h("div", { class: "etiqueta__nombre" }, producto.itemName),
+    fila("Artículo", producto.itemCode), fila("Sueltas", `${unidadesTexto(total)} de ${numero(sueltas.length)} lotes`),
+    h("ul", { class: "etiqueta__lotes" }, sueltas.map((c) => h("li", {},
+      h("strong", {}, c.lote ?? "Sin lote"), ` · ${unidadesTexto(c.unidadesIniciales)} · ${textoVencimiento(c.vencimiento)} · `, h("span", { class: "codigo" }, c.codigo)))),
+    fila("Recibido", fechaLocal(sueltas[0].recibidaEn)));
 }
 
 // Etiqueta de una caja: datos para leer a simple vista y el código CJ-000123 para escanear.
@@ -2660,7 +2718,7 @@ function codigoBarras(texto) {
 }
 
 // Imprime solo las etiquetas: se dibujan en una zona que la hoja de estilos muestra únicamente al imprimir.
-const imprimirEtiquetas = (cajas, producto) => imprimirZona(cajas.map((c, i) => etiquetaCaja(c, producto, cajas.length > 1 ? { numero: i + 1, de: cajas.length } : null)));
+const imprimirEtiquetas = (cajas, producto) => imprimirZona(etiquetasDeCajas(cajas, producto));
 function zonaImpresion() {
   let zona = document.getElementById("impresion");
   if (!zona) { zona = h("div", { id: "impresion", class: "impresion", "aria-hidden": "true" }); document.body.append(zona); }
@@ -3072,28 +3130,30 @@ async function vistaConteo({ bodega = null, almacen = null, itemCode = null, edi
     const casilla = h("input", { id: "conteo-imprimir", type: "checkbox", checked: imprimirAlGuardar(),
       onchange: (evento) => { guardado.escribir("imprimirAlGuardar", evento.target.checked); repintar?.(); } });
     poner(cola, h("label", { class: "opcion", for: "conteo-imprimir" }, casilla, "Imprimir las etiquetas al guardar"),
-      pendientes.length > 0 && boton("", "impresora", `Imprimir ${etiquetasTexto(pendientes.length)} pendientes`, { onclick: imprimirCola }));
+      pendientes.length > 0 && boton("", "impresora", `Imprimir ${etiquetasTexto(etiquetasDeCola(pendientes).length)} pendientes`, { onclick: imprimirCola }));
   }
   async function imprimirCola() {
-    const pendientes = etiquetasPendientes();
-    const r = await imprimirZona(pendientes.map((e) => etiquetaCaja(e.caja, e.producto)));
-    if (r.ok) { guardado.borrar("etiquetasPendientes"); avisar("ok", `Se mandaron ${etiquetasTexto(pendientes.length)} a la impresora.`); }
+    const etiquetas = etiquetasDeCola(etiquetasPendientes());
+    const r = await imprimirZona(etiquetas);
+    if (r.ok) { guardado.borrar("etiquetasPendientes"); avisar("ok", `Se mandaron ${etiquetasTexto(etiquetas.length)} a la impresora.`); }
     else if (r.motivo !== "cancelled") avisar("error", "No se pudo imprimir. Revisá que la impresora esté encendida y probá de nuevo.");
     pintarCola();
   }
   // Etiquetas de lo que se acaba de contar: a la impresora o a la cola. Devuelve la frase para el aviso.
   async function etiquetasDe(cajas, p) {
     const producto = { itemCode: p.itemCode, itemName: p.itemName };
+    const n = agruparEtiquetas(cajas).length;
     if (imprimirAlGuardar()) {
       const r = await imprimirEtiquetas(cajas, producto);
-      if (r.ok) return ` ${cajas.length === 1 ? "Se mandó 1 etiqueta" : `Se mandaron ${etiquetasTexto(cajas.length)}`} a la impresora.`;
+      if (r.ok) return ` ${n === 1 ? "Se mandó 1 etiqueta" : `Se mandaron ${etiquetasTexto(n)}`} a la impresora.`;
     }
     guardado.escribir("etiquetasPendientes", [...etiquetasPendientes(), ...cajas.map((caja) => ({ caja, producto }))]);
     pintarCola();
-    return ` ${cajas.length === 1 ? "1 etiqueta quedó" : `${etiquetasTexto(cajas.length)} quedaron`} para imprimir.`;
+    return ` ${n === 1 ? "1 etiqueta quedó" : `${etiquetasTexto(n)} quedaron`} para imprimir.`;
   }
 
-  const textoHay = (v) => (v.unidades === 0 ? "No hay" : grande ? textoContado({ total: v.unidades, cajas: v.cajas, etiquetas: v.cajas }) : unidadesTexto(v.unidades));
+  const textoHay = (v) => (v.unidades === 0 ? "No hay" : grande ? textoContado({ total: v.unidades, cajas: v.cajas, etiquetas: v.cajas, lotesSueltos: v.sueltos ?? 0 })
+    : unidadesTexto(v.unidades));
   function pintarLista(r) {
     if (!r.data.length) {
       return poner(filasLista, h("li", { class: "conteo__vacio" }, buscar ? `Ningún producto coincide con "${buscar}".`
@@ -3182,11 +3242,12 @@ async function vistaConteo({ bodega = null, almacen = null, itemCode = null, edi
   function verProducto(itemCode) { estado.desdeConteo = extra ? { almacen } : bodega; vistaProducto(itemCode); }
   function yaContado(p) {
     const unidadesEn = extra ? p.unidades : grande ? p.lotes.reduce((t, l) => t + l.unidades, 0) : p.pequena;
-    const cajas = extra ? p.cajas : grande ? p.lotes.reduce((t, l) => t + l.cajas.filter((c) => c.unidades > 0).length, 0) : 0;
-    const bulto = extra && p.lineas.some((l) => l.cajas === null) && grande;
+    const enLa01 = grande && !extra ? p.lotes.flatMap((l) => l.cajas).filter((c) => c.unidades > 0) : [];
+    const cajas = extra ? p.cajas : enLa01.filter((c) => !c.suelto).length;
+    const lotesSueltos = extra ? (grande ? p.lineas.filter((l) => l.cajas === null).length : 0) : enLa01.filter((c) => c.suelto).length;
     const proximo = filas.find((v) => lista === "falta" && v.itemCode !== p.itemCode);
     poner(panel, cabeza(p),
-      aviso("ok", `Ya está contado en ${corto}: ${unidadesEn ? textoContado({ total: unidadesEn, cajas, etiquetas: cajas + (bulto ? 1 : 0) }) : "no hay"}.`
+      aviso("ok", `Ya está contado en ${corto}: ${unidadesEn ? textoContado({ total: unidadesEn, cajas, etiquetas: cajas, lotesSueltos }) : "no hay"}.`
         + (extra && p.contadoPor ? ` Lo contó ${p.contadoPor}${p.actualizadoPor && p.actualizadoPor !== p.contadoPor ? `; lo corrigió ${p.actualizadoPor}` : ""}.` : "")),
       h("p", { class: "suave" }, esSupervisor() ? "Si faltó un lote o una fecha está mal, editá el conteo: se abre con lo que se guardó."
         : "Si faltó algo, avisale al supervisor: él puede editar el conteo."),
@@ -3225,7 +3286,7 @@ async function vistaConteo({ bodega = null, almacen = null, itemCode = null, edi
     const mostrarProblema = (texto) => { textoAviso(problema, texto); problema.hidden = false; };
     const codigoCaja = grande ? campoCodigoCaja(p) : null;
     function leerConteo() {
-      if (grande) { const { filas: grupos, bulto } = campos.leer(); return armarConteoCajas(grupos, bulto); }
+      if (grande) { const { filas: grupos, bultos } = campos.leer(); return armarConteoCajas(grupos, bultos); }
       const r = armarLotesPequena(campos.leer());
       return r.problema ? r : { cuerpo: { modo: "lotes", lotes: r.lotes }, total: r.total, cajas: 0, etiquetas: 0 };
     }
@@ -3329,7 +3390,7 @@ async function vistaConteo({ bodega = null, almacen = null, itemCode = null, edi
     const operacion = operacionesNoHay.get(producto.itemCode) ?? crearOperacion();
     operacionesNoHay.set(producto.itemCode, operacion);
     try {
-      if (extra) await api.guardarConteoAlmacen(almacen, producto.itemCode, operacion.para(grande ? { grupos: [], bulto: null } : { lotes: [] }));
+      if (extra) await api.guardarConteoAlmacen(almacen, producto.itemCode, operacion.para(grande ? { grupos: [], bultos: [] } : { lotes: [] }));
       else await api.sinExistencia(producto.itemCode, operacion.para({ bodega }));
       operacion.terminar();
       operacionesNoHay.delete(producto.itemCode);

@@ -190,7 +190,7 @@ import { ESTADOS, armarAsignaciones, armarConteo, armarGrupos, armarLotesDespach
   filtrosBodega, filtrosExistencias, finDeMes, nombreOpcion, textoLoteBodega, cajasDeLaGrande, cajasEscaneadas, lotesParaEscanear, venceDespues,
   opcionesDescuento, quien, resumenRecepcion, revisarDespacho, sugerirAsignacion, textoAsignacion, textoDocumento, textoEstado, textoMovimiento,
   textoPorVencer, textoVencimiento, unidadesPorProducto, nombreBodega, haceTiempo, estadoSap, avanceConteo, pasosPuestaEnMarcha, armarLotesPequena,
-  armarConteoCajas, conteoGuardadoAlmacen, conteoGuardadoGrande, cuerpoEdicionGrande, textoContado, filasTraspaso, resumenTraspaso, pareceCodigoBarras } from "../ui/js/inventario.js";
+  agruparEtiquetas, armarConteoCajas, conteoGuardadoAlmacen, conteoGuardadoGrande, cuerpoEdicionGrande, textoContado, filasTraspaso, resumenTraspaso, pareceCodigoBarras } from "../ui/js/inventario.js";
 
 // Bodegas con su almacén asignado, como las devuelve el servidor.
 const BODEGAS = { grande: { almacen: "01", nombre: "Almacén Principal" }, pequena: { almacen: "02", nombre: "Despacho" } };
@@ -396,12 +396,12 @@ test("inventario: recibir o contar cajas por lote, con el bulto de lo que sobra"
   const filas = [{ cajas: 3, unidadesPorCaja: 20, lote: "L1", vencimiento: "2027-01-31" }, { cajas: 2, unidadesPorCaja: 24, lote: null, vencimiento: null }];
   const r = armarGrupos(filas, { unidades: 7, lote: "", vencimiento: null });
   assert.deepEqual(r, { grupos: [{ cajas: 3, unidadesPorCaja: 20, lote: "L1", vencimiento: "2027-01-31" }, { cajas: 2, unidadesPorCaja: 24, lote: null, vencimiento: null }],
-    bulto: { unidades: 7, lote: null, vencimiento: null }, cajas: 5, enCajas: 108, total: 115, etiquetas: 6 });
+    bultos: [{ unidades: 7, lote: null, vencimiento: null }], cajas: 5, enCajas: 108, total: 115, etiquetas: 6 });
   assert.equal(armarGrupos(filas).etiquetas, 5);
   assert.match(armarGrupos([...filas, { cajas: 0, unidadesPorCaja: 10 }]).problema, /cantidad de cajas, de 1 a 2000 \(fila 3\)/);
   assert.match(armarGrupos([{ cajas: 2, unidadesPorCaja: NaN }]).problema, /cuántas unidades trae cada caja\.$/);
-  assert.match(armarGrupos(filas, { unidades: 0 }).problema, /sueltas sobraron/);
-  assert.match(armarGrupos([]).problema, /al menos una fila/);
+  assert.match(armarGrupos(filas, { unidades: 0 }).problema, /cuántas unidades sueltas hay/);
+  assert.match(armarGrupos([]).problema, /al menos una fila de cajas o de unidades sueltas/);
   assert.match(armarGrupos([{ cajas: 2000, unidadesPorCaja: 1 }, { cajas: 1001, unidadesPorCaja: 1 }]).problema, /Hasta 3000 cajas por vez/);
   // Un lote de 265 cajas entra en una sola fila.
   assert.equal(armarGrupos([{ cajas: 265, unidadesPorCaja: 6, lote: "13662" }]).problema, undefined);
@@ -410,7 +410,7 @@ test("inventario: recibir o contar cajas por lote, con el bulto de lo que sobra"
   assert.deepEqual(resumenRecepcion({ modo: "grupos", grupos: [{ cajas: 4, unidadesPorCaja: 20, lote: "L2408-090" }] }),
     { total: 80, texto: "Entran 4 cajas · 80 unidades del lote L2408-090 a la grande." });
   assert.deepEqual(resumenRecepcion({ modo: "grupos", grupos: filas, bulto: { unidades: 7 } }, BODEGAS),
-    { total: 115, texto: "Entran 5 cajas · 108 unidades de 2 lotes a la 01. Más un bulto suelto de 7 unidades." });
+    { total: 115, texto: "Entran 5 cajas · 108 unidades de 2 lotes a la 01. Más 7 unidades sueltas, en un bulto." });
   assert.equal(resumenRecepcion({ modo: "grupos", grupos: [{ cajas: 0, unidadesPorCaja: 5 }] }).total, 0);
 });
 
@@ -477,12 +477,12 @@ test("inventario: puesta en marcha del supervisor", () => {
 });
 
 test("inventario: conteo de la 01 en cajas y de la 02 por lote", () => {
-  // 01: las filas vacías no cuentan; si solo hay suelto, va como un bulto.
+  // 01: las filas vacías no cuentan; lo suelto va por lote (también sin cajas).
   const vacia = { cajas: null, unidadesPorCaja: 20, lote: null, vencimiento: null };
-  assert.deepEqual(armarConteoCajas([{ cajas: 4, unidadesPorCaja: 20, lote: "L1", vencimiento: null }, vacia], null),
-    { cuerpo: { modo: "grupos", grupos: [{ cajas: 4, unidadesPorCaja: 20, lote: "L1", vencimiento: null }], bulto: null }, total: 80, cajas: 4, etiquetas: 4 });
-  assert.deepEqual(armarConteoCajas([vacia], { unidades: 6, lote: "L2", vencimiento: "2027-03-31" }),
-    { cuerpo: { modo: "suelto", destino: "grande", unidades: 6, lote: "L2", vencimiento: "2027-03-31" }, total: 6, cajas: 0, etiquetas: 1 });
+  assert.deepEqual(armarConteoCajas([{ cajas: 4, unidadesPorCaja: 20, lote: "L1", vencimiento: null }, vacia], []),
+    { cuerpo: { modo: "grupos", grupos: [{ cajas: 4, unidadesPorCaja: 20, lote: "L1", vencimiento: null }], bultos: [] }, total: 80, cajas: 4, etiquetas: 4, lotesSueltos: 0 });
+  assert.deepEqual(armarConteoCajas([vacia], [{ unidades: 6, lote: "L2", vencimiento: "2027-03-31" }]),
+    { cuerpo: { modo: "grupos", grupos: [], bultos: [{ unidades: 6, lote: "L2", vencimiento: "2027-03-31" }] }, total: 6, cajas: 0, etiquetas: 1, lotesSueltos: 1 });
   assert.match(armarConteoCajas([vacia], null).problema, /«No hay»/);
   assert.match(armarConteoCajas([{ ...vacia, lote: "L3" }], null).problema, /cantidad de cajas/);
   assert.equal(textoContado({ total: 77, cajas: 5, etiquetas: 6 }), "77 unidades en 5 cajas y un bulto");
@@ -548,14 +548,17 @@ test("editar el conteo de la grande: lo guardado vuelve al formulario por lote, 
   assert.deepEqual(conteoGuardadoGrande(lotes), {
     filas: [{ cajas: 2, unidadesPorCaja: 20, lote: "L1", vencimiento: "2027-03-31" }, { cajas: 1, unidadesPorCaja: 12, lote: "L1", vencimiento: "2027-03-31" },
       { cajas: 1, unidadesPorCaja: 24, lote: "L2", vencimiento: null }],
-    bulto: { unidades: 7, lote: "L2", vencimiento: null } });
-  // Una caja ya usada o dos bultos: se corrige desde el producto.
+    bultos: [{ unidades: 7, lote: "L2", vencimiento: null }] });
+  // Una caja ya usada: se corrige desde el producto. Varios bultos: uno por lote (los del mismo lote se suman).
   assert.match(conteoGuardadoGrande([{ cajas: [caja("CJ-1", "L1", null, 15, { unidadesIniciales: 20 })] }]).problema, /corregí esa caja/);
-  assert.match(conteoGuardadoGrande([{ cajas: [caja("CJ-1", null, null, 3, { suelto: true }), caja("CJ-2", null, null, 4, { suelto: true })] }]).problema, /más de un bulto/);
-  // El cuerpo de la edición: grupos y bulto, también cuando solo queda un bulto.
-  assert.deepEqual(cuerpoEdicionGrande({ modo: "grupos", grupos: [{ cajas: 1 }], bulto: null }), { grupos: [{ cajas: 1 }], bulto: null });
+  assert.deepEqual(conteoGuardadoGrande([{ cajas: [caja("CJ-1", "T1", null, 3, { suelto: true }), caja("CJ-2", "T2", "2027-05-31", 4, { suelto: true }),
+    caja("CJ-3", "T1", null, 2, { suelto: true })] }]).bultos,
+  [{ unidades: 5, lote: "T1", vencimiento: null }, { unidades: 4, lote: "T2", vencimiento: "2027-05-31" }]);
+  // El cuerpo de la edición: grupos y bultos (también desde el formato anterior de un solo bulto).
+  assert.deepEqual(cuerpoEdicionGrande({ modo: "grupos", grupos: [{ cajas: 1 }], bultos: [] }), { grupos: [{ cajas: 1 }], bultos: [] });
+  assert.deepEqual(cuerpoEdicionGrande({ modo: "grupos", grupos: [], bulto: { unidades: 2 } }), { grupos: [], bultos: [{ unidades: 2 }] });
   assert.deepEqual(cuerpoEdicionGrande({ modo: "suelto", destino: "grande", unidades: 6, lote: "L2", vencimiento: null }),
-    { grupos: [], bulto: { unidades: 6, lote: "L2", vencimiento: null } });
+    { grupos: [], bultos: [{ unidades: 6, lote: "L2", vencimiento: null }] });
 });
 
 test("traspaso escaneando: cada caja es una entera del lote y fecha que dice; el que vence primero va adelante", () => {
@@ -608,6 +611,25 @@ test("conteo de un almacén solo para contar por cajas: lo guardado vuelve al fo
     { lote: null, vencimiento: null, cajas: 1, unidadesPorCaja: 6, unidades: 6 },
     { lote: "A", vencimiento: "2027-01-31", cajas: null, unidadesPorCaja: null, unidades: 4 },
   ]), { filas: [{ cajas: 3, unidadesPorCaja: 12, lote: "A", vencimiento: "2027-01-31" }, { cajas: 1, unidadesPorCaja: 6, lote: null, vencimiento: null }],
-    bulto: { unidades: 4, lote: "A", vencimiento: "2027-01-31" } });
-  assert.deepEqual(conteoGuardadoAlmacen([]), { filas: [], bulto: null });
+    bultos: [{ unidades: 4, lote: "A", vencimiento: "2027-01-31" }] });
+  assert.deepEqual(conteoGuardadoAlmacen([]), { filas: [], bultos: [] });
+});
+
+test("sueltas de varios lotes (cajas de tintes mezcladas): una fila por lote y una sola etiqueta para todo lo suelto", () => {
+  const vacia = { cajas: null, unidadesPorCaja: null, lote: null, vencimiento: null };
+  const r = armarConteoCajas([vacia], [{ unidades: 18, lote: "T1", vencimiento: "2027-05-31" }, { unidades: 24, lote: "T2", vencimiento: null }, { unidades: 30, lote: "T3", vencimiento: null }]);
+  assert.deepEqual([r.total, r.cajas, r.etiquetas, r.lotesSueltos, r.cuerpo.grupos], [72, 0, 1, 3, []]);
+  assert.equal(textoContado(r), "72 unidades sueltas de 3 lotes");
+  const conCajas = armarConteoCajas([{ cajas: 2, unidadesPorCaja: 72, lote: "MIX", vencimiento: null }], [{ unidades: 5, lote: "T1" }, { unidades: 6, lote: "T2" }]);
+  assert.deepEqual([conCajas.total, conCajas.etiquetas], [155, 3]);
+  assert.equal(textoContado(conCajas), "155 unidades en 2 cajas y un bulto de 2 lotes");
+  assert.match(armarConteoCajas([vacia], [{ unidades: 1, lote: "T1" }, { unidades: 2, lote: "T1" }]).problema, /T1 está repetido/);
+  assert.match(armarConteoCajas([vacia], [{ unidades: null, lote: "T1" }]).problema, /cuántas unidades sueltas/);
+  assert.deepEqual(resumenRecepcion({ modo: "grupos", grupos: [], bultos: [{ unidades: 18, lote: "T1" }, { unidades: 24, lote: "T2" }] }, BODEGAS),
+    { total: 42, texto: "Entran 42 unidades sueltas de 2 lotes, en un bulto a la 01." });
+  // Etiquetas: una por caja entera y una para lo suelto; un solo bulto suelto lleva su etiqueta de siempre.
+  const c = (codigo, suelto) => ({ codigo, suelto });
+  assert.deepEqual(agruparEtiquetas([c("CJ-1", false), c("CJ-2", true), c("CJ-3", false), c("CJ-4", true)]),
+    [{ caja: c("CJ-1", false) }, { caja: c("CJ-3", false) }, { sueltas: [c("CJ-2", true), c("CJ-4", true)] }]);
+  assert.deepEqual(agruparEtiquetas([c("CJ-1", false), c("CJ-2", true)]), [{ caja: c("CJ-1", false) }, { caja: c("CJ-2", true) }]);
 });

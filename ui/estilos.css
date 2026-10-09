@@ -898,6 +898,8 @@ h2 {
 
 /* Solo las etiquetas salen en la impresión. */
 .impresion { display: none; }
+.etiqueta__lotes { margin: 4px 0 6px; padding-left: 18px; font-size: 14px; line-height: 1.35; }
+.etiqueta__lotes li + li { margin-top: 2px; }
 @media print {
   @page { margin: 8mm; }
   /* Blanco también en los márgenes de la hoja (sin esto queda el fondo de la ventana). */
@@ -906,6 +908,7 @@ h2 {
   .impresion { display: block; }
   .impresion .etiqueta-caja { width: 90mm; margin: 0 0 6mm; page-break-inside: avoid; break-inside: avoid; }
   .impresion .etiqueta__barras { max-width: none; height: 16mm; }
+  .impresion .etiqueta__lotes { font-size: 9pt; }
 }
 
 /* ---------- Reportes (panel del supervisor): cuadre con SAP en pantalla y en PDF ---------- */
