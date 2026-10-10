@@ -71,6 +71,8 @@ export function crearApi({ token, base = "", fetchImpl = (...args) => globalThis
     anularRevision: (pickingId) => pedir("POST", `/supervisor/revisiones/${pickingId}/anulacion`),
     sincronizacion: () => pedir("GET", "/supervisor/sincronizacion"),
     reporteCuadre: () => pedir("GET", "/supervisor/reportes/cuadre"),
+    solicitudSincronizacion: () => pedir("GET", "/supervisor/sincronizacion/solicitud"),
+    actualizarTodo: () => pedir("POST", "/supervisor/sincronizacion/solicitud", {}),
     almacenes: () => pedir("GET", "/supervisor/almacenes"),
     // porBodega: { almacenGrande, almacenPequena }, qué almacén marcado es cada bodega (null: sin asignar), y soloConteo:
     // [{ almacen, tipo: "cajas" | "sueltas" }], los que solo se cuentan (sin enviar, quedan como estaban).
