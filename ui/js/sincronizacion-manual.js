@@ -4,7 +4,7 @@ export function presentacionManual({ datos, consultando, enviando, incierto, err
   const s = datos?.solicitud;
   let texto = "Consultando disponibilidad…", tipo = "info";
   if (datos) {
-    texto = "Podés pedir una actualización de todos los datos habilitados del puente.";
+    texto = "Podés actualizar productos, pedidos y existencias de los almacenes seleccionados.";
     if (!datos.entidades?.length) texto = "Falta actualizar y ejecutar el puente para habilitar esta función.";
     if (s?.estado === "pendiente") texto = "Solicitud guardada. Esperando al puente.";
     if (s?.estado === "sincronizando") texto = `Actualizando: ${s.completas.length} de ${s.entidades.length} entidades completas. Puede continuar en varias ejecuciones.`;
@@ -14,7 +14,7 @@ export function presentacionManual({ datos, consultando, enviando, incierto, err
   if (incierto) { texto = "No pudimos confirmar la solicitud. Estamos consultando su estado antes de permitir otro intento."; tipo = "alerta"; }
   if (error?.status === 404) { texto = "Falta actualizar el backend para habilitar esta función."; tipo = "alerta"; }
   return { texto, tipo, deshabilitado: consultando || enviando || incierto || !datos?.entidades?.length || enCurso(s) || Boolean(error),
-    boton: enviando ? "Solicitando…" : enCurso(s) ? "Actualización en curso" : "Actualizar todo" };
+    boton: enviando ? "Solicitando…" : enCurso(s) ? "Actualización en curso" : "Actualizar productos, pedidos y existencias" };
 }
 
 // Solo consultas mientras la vista está abierta. El POST no se reintenta solo:

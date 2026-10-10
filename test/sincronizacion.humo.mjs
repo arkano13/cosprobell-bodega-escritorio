@@ -33,7 +33,7 @@ try {
     let data;
     if (ruta.endsWith("/solicitud")) {
       if (route.request().method() === "POST") {
-        posts++; solicitud = { id: "prueba", estado: "pendiente", entidades, completas: [] };
+        posts++; solicitud = { id: "prueba", estado: "pendiente", entidades: ["productos", "pedidos", "existencias"], completas: [] };
         data = solicitud;
       } else { consultas++; data = { entidades, solicitud, ultimaConexion: new Date().toISOString() }; }
     } else if (ruta.endsWith("/sincronizacion")) {
@@ -45,14 +45,14 @@ try {
   await page.goto(base);
   await page.getByRole("button", { name: "Panel del supervisor", exact: true }).click();
   await page.getByRole("button", { name: "Sincronización", exact: true }).click();
-  await page.getByRole("button", { name: "Actualizar todo", exact: true }).click();
+  await page.getByRole("button", { name: "Actualizar productos, pedidos y existencias", exact: true }).click();
   await page.getByText("Solicitud guardada. Esperando al puente.", { exact: true }).waitFor();
   assert.equal(await page.getByRole("button", { name: "Actualización en curso" }).isDisabled(), true);
-  solicitud = { ...solicitud, estado: "sincronizando", completas: ["productos", "clientes"] };
-  await page.getByText(/Actualizando: 2 de 7/).waitFor({ timeout: 12000 });
+  solicitud = { ...solicitud, estado: "sincronizando", completas: ["productos", "pedidos"] };
+  await page.getByText(/Actualizando: 2 de 3/).waitFor({ timeout: 12000 });
   await mkdir("dist", { recursive: true });
   await page.screenshot({ path: "dist/actualizacion-manual.png", fullPage: true });
-  solicitud = { ...solicitud, estado: "completado", completas: entidades, finalizadaEn: new Date().toISOString() };
+  solicitud = { ...solicitud, estado: "completado", completas: solicitud.entidades, finalizadaEn: new Date().toISOString() };
   const antes = tablas;
   await page.getByText("Actualización completada.", { exact: true }).waitFor({ timeout: 12000 });
   assert.ok(tablas > antes); assert.equal(posts, 1);

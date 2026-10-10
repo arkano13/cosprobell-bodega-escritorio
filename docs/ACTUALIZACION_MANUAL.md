@@ -1,7 +1,7 @@
-# Botón Actualizar todo
+# Botón Actualizar productos, pedidos y existencias
 
 Disponible para supervisores en Panel del supervisor → Sincronización.
-Solicita al puente un recorrido de todos los datos habilitados y muestra espera,
+Solicita al puente un recorrido de productos, pedidos y existencias habilitadas y muestra espera,
 avance por entidad, finalización o error. La tabla se refresca al completar.
 
 Requiere publicar primero el backend con las rutas
