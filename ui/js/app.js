@@ -1,7 +1,7 @@
 import { crearApi } from "./api.js";
 import { crearColaLecturas } from "./lecturas.js";
 import { icono } from "./iconos.js";
-import { HORAS_EN_LISTA, sigueEnLista, textosPreparado } from "./preparados.js";
+import { HORAS_EN_LISTA, datosLinea, pedidoConNombres, sigueEnLista, textosPreparado } from "./preparados.js";
 import { NOMBRES_DATOS, estadoDatos, estadoOperador, puedeSerUnidad, quienConfirmo, textoCambio, textoRevision, textoSinEntrega, textoUnidad } from "./supervisor.js";
 import { ESTADOS, TEXTO_SIN_COMPARACION, armarAsignaciones, agruparEtiquetas, armarConteo, armarConteoCajas, conteoGuardadoAlmacen, conteoGuardadoGrande, cuerpoEdicionGrande, armarGrupos, armarLotesDespacho, armarLotesPequena, avanceConteo,
   cantidadMovimiento, diasParaVencer, esCodigoCaja, pareceCodigoBarras, estadoFila, estadoSap, filtrosBodega, filtrosExistencias, finDeMes, nombreBodega, nombreOpcion, opcionesDescuento,
@@ -532,7 +532,7 @@ async function vistaPedidos() {
 async function verResumen(p) {
   mostrar(cargando("Cargando resumen…"));
   try {
-    const [pedido, sesion] = await Promise.all([api.pedido(p.docEntry).then((r) => r.data), api.sesion(p.preparado.pickingId).then((r) => r.data)]);
+    const [pedido, sesion] = await Promise.all([api.pedido(p.docEntry).then(pedidoConNombres), api.sesion(p.preparado.pickingId).then((r) => r.data)]);
     vistaResumen(sesion, pedido);
   } catch (error) { mostrarError(error, () => verResumen(p)); }
 }
@@ -553,6 +553,7 @@ function tarjetaLinea(linea, nombre, { pedida, escaneada = null, reciente = fals
     h("div", { class: "linea__nombre" }, nombre.itemName ?? nombre.itemCode),
     h("div", { class: "linea__detalle" }, h("span", { class: "codigo" }, nombre.itemCode),
       [nombre.uomCode && `Unidad ${nombre.uomCode}`, nombre.warehouseCode && `Bodega ${nombre.warehouseCode}`].filter(Boolean).join(" · ")),
+    nombre.combo && h("div", { class: "linea__combo" }, icono("combo"), `Del combo ${nombre.combo}`),
     h("div", { class: "linea__cantidad" },
       escaneada === null ? cantidad(pedida) : [cantidad(escaneada), h("span", { class: "linea__total" }, ` / ${cantidad(pedida)}`)],
       completa ? h("span", { class: "insignia insignia--ok" }, icono("completa"), "Completa")
@@ -564,7 +565,8 @@ async function vistaPedido(docEntry) {
   mostrar(cargando("Cargando pedido…"));
   let respuesta;
   try { respuesta = await api.pedido(docEntry); } catch (error) { return mostrarError(error, () => vistaPedido(docEntry)); }
-  const { data: pedido, preparacion } = respuesta;
+  const { preparacion } = respuesta;
+  const pedido = pedidoConNombres(respuesta);
   const problema = aviso("error", preparacion.message ?? "", { role: "alert", hidden: preparacion.datosValidos });
   const empezar = boton("boton--principal boton--ancho boton--grande", "escaner", "Empezar preparación", { disabled: !preparacion.datosValidos });
   empezar.addEventListener("click", async () => {
@@ -592,7 +594,7 @@ async function vistaPedido(docEntry) {
     problema,
     aPreparar.length > 0 && h("h2", {}, "A preparar"),
     h("ul", { class: "lineas" }, aPreparar.map((l) =>
-      tarjetaLinea(l.pedidoLineNum, { ...lineasPorNumero.get(l.pedidoLineNum), uomCode: l.uomCode }, { pedida: l.cantidadPedida }))),
+      tarjetaLinea(l.pedidoLineNum, datosLinea(l, lineasPorNumero, pedido.nombres), { pedida: l.cantidadPedida }))),
     empezar);
 }
 
@@ -605,7 +607,7 @@ async function vistaEscaneo() {
   mostrar(cargando("Abriendo preparación…"));
   let pedido, sesion;
   try {
-    [pedido, sesion] = await Promise.all([api.pedido(docEntry).then((r) => r.data), api.sesion(pickingId).then((r) => r.data)]);
+    [pedido, sesion] = await Promise.all([api.pedido(docEntry).then(pedidoConNombres), api.sesion(pickingId).then((r) => r.data)]);
   } catch (error) {
     if (error.status === 404) { guardarSesion(null); return vistaPedidos(); }
     return mostrarError(error, vistaEscaneo);
@@ -656,8 +658,7 @@ async function vistaEscaneo() {
       h("span", { class: "suave" }, pendientesTexto(lineas.filter((l) => l.cantidadEscaneada < l.cantidadPedida).length)));
     // Primero las pendientes; las completas quedan al final.
     const orden = [...lineas].sort((a, b) => (a.cantidadEscaneada >= a.cantidadPedida) - (b.cantidadEscaneada >= b.cantidadPedida));
-    lista.replaceChildren(...orden.map((l) => tarjetaLinea(l.pedidoLineNum,
-      { ...lineasPedido.get(l.pedidoLineNum), itemCode: l.itemCode, uomCode: l.uomCode },
+    lista.replaceChildren(...orden.map((l) => tarjetaLinea(l.pedidoLineNum, datosLinea(l, lineasPedido, pedido.nombres),
       { pedida: l.cantidadPedida, escaneada: l.cantidadEscaneada, reciente: l.id === lineaReciente })));
     const activa = sesion.estado === "en_proceso";
     entrada.disabled = !activa;
@@ -688,7 +689,7 @@ async function vistaEscaneo() {
   }
 
   function nombreDe(linea) {
-    return lineasPedido.get(linea.pedidoLineNum)?.itemName ?? linea.itemCode;
+    return datosLinea(linea, lineasPedido, pedido.nombres).itemName ?? linea.itemCode;
   }
 
   const registro = colaDe(pickingId);
@@ -921,8 +922,7 @@ function vistaResumen(sesion, pedido, volver = { texto: "Volver a pedidos", acci
         sesion.fechaInicio && dato("Inicio", fechaHora(sesion.fechaInicio)),
         sesion.fechaFin && dato("Fin", fechaHora(sesion.fechaFin)))),
     faltantes.length > 0 && h("div", { class: "tarjeta" }, h("h2", {}, "Faltantes"),
-      h("ul", { class: "lineas" }, faltantes.map((l) => tarjetaLinea(l.pedidoLineNum,
-        { ...lineasPedido.get(l.pedidoLineNum), itemCode: l.itemCode, uomCode: l.uomCode },
+      h("ul", { class: "lineas" }, faltantes.map((l) => tarjetaLinea(l.pedidoLineNum, datosLinea(l, lineasPedido, pedido.nombres),
         { pedida: l.cantidadPedida, escaneada: l.cantidadEscaneada })))),
     boton("boton--principal boton--ancho boton--grande", "volver", volver.texto, { onclick: volver.accion }));
 }
@@ -1213,7 +1213,7 @@ async function panelRevisiones(panel) {
   async function verResumen(f) {
     mostrar(cargando("Cargando resumen…"));
     try {
-      const [pedido, sesion] = await Promise.all([api.pedido(f.pedido.docEntry).then((r) => r.data), api.sesion(f.pickingId).then((r) => r.data)]);
+      const [pedido, sesion] = await Promise.all([api.pedido(f.pedido.docEntry).then(pedidoConNombres), api.sesion(f.pickingId).then((r) => r.data)]);
       vistaResumen(sesion, pedido, { texto: "Volver al panel", accion: () => vistaSupervisor("revisiones") });
     } catch (error) { mostrarError(error, () => verResumen(f)); }
   }

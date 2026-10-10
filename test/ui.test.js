@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import { crearApi, ErrorApi } from "../ui/js/api.js";
 import { crearColaLecturas } from "../ui/js/lecturas.js";
 import { nuevoUuid } from "../ui/js/uuid.js";
-import { HORAS_EN_LISTA, sigueEnLista, textosPreparado } from "../ui/js/preparados.js";
+import { HORAS_EN_LISTA, datosLinea, pedidoConNombres, sigueEnLista, textosPreparado } from "../ui/js/preparados.js";
 import { conSigno, destacadosCuadre, nombreArchivoCuadre, notaCuadre, porcentaje, unidadesConSigno } from "../ui/js/reportes.js";
 import { estadoDatos, estadoOperador, puedeSerUnidad, quienConfirmo, textoCambio, textoRevision, textoSinEntrega, textoUnidad } from "../ui/js/supervisor.js";
 
@@ -632,4 +632,22 @@ test("sueltas de varios lotes (cajas de tintes mezcladas): una fila por lote y u
   assert.deepEqual(agruparEtiquetas([c("CJ-1", false), c("CJ-2", true), c("CJ-3", false), c("CJ-4", true)]),
     [{ caja: c("CJ-1", false) }, { caja: c("CJ-3", false) }, { sueltas: [c("CJ-2", true), c("CJ-4", true)] }]);
   assert.deepEqual(agruparEtiquetas([c("CJ-1", false), c("CJ-2", true)]), [{ caja: c("CJ-1", false) }, { caja: c("CJ-2", true) }]);
+});
+
+test("combos: cada producto del combo se muestra con su nombre y el del combo del que sale", () => {
+  const respuesta = { data: { docEntry: 9, lineas: [{ lineNum: 0, itemCode: "ER10474", itemName: "Promo.01 Smooth", warehouseCode: "02" },
+    { lineNum: 1, itemCode: "P1", itemName: "Shampoo", warehouseCode: "02", uomCode: "Manual" }] },
+    preparacion: {}, nombres: { ER10474: "Promo.01 Smooth", ER10028: "BS10 Smoothing Mask" } };
+  const pedido = pedidoConNombres(respuesta);
+  assert.deepEqual(pedido.nombres, respuesta.nombres);
+  assert.deepEqual(pedidoConNombres({ data: { docEntry: 1 } }).nombres, {}, "un backend anterior no manda nombres");
+  const lineas = new Map(pedido.lineas.map((l) => [l.lineNum, l]));
+  assert.deepEqual(datosLinea({ pedidoLineNum: 0, itemCode: "ER10028", uomCode: null, comboItemCode: "ER10474" }, lineas, pedido.nombres),
+    { itemCode: "ER10028", itemName: "BS10 Smoothing Mask", uomCode: null, warehouseCode: "02", combo: "Promo.01 Smooth" });
+  // Sin nombre conocido: el código del producto y del combo.
+  assert.deepEqual(datosLinea({ pedidoLineNum: 0, itemCode: "ER10030", comboItemCode: "ER99" }, lineas, {}),
+    { itemCode: "ER10030", itemName: null, uomCode: null, warehouseCode: "02", combo: "ER99" });
+  // Una línea común sigue igual que antes: la del pedido, con la unidad de la preparación.
+  assert.deepEqual(datosLinea({ pedidoLineNum: 1, itemCode: "P1", uomCode: "Manual" }, lineas, pedido.nombres),
+    { lineNum: 1, itemCode: "P1", itemName: "Shampoo", warehouseCode: "02", uomCode: "Manual" });
 });

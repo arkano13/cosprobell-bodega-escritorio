@@ -37,3 +37,15 @@ export function sigueEnLista(preparado, ahora = Date.now()) {
   const fin = Date.parse(preparado.fechaFin);
   return !Number.isFinite(fin) || ahora - fin < HORAS_EN_LISTA * HORA;
 }
+
+// Pedido con los nombres de sus artículos y de los productos de sus combos (GET /pedidos/:docEntry los trae aparte).
+export const pedidoConNombres = (respuesta) => ({ ...respuesta.data, nombres: respuesta.nombres ?? {} });
+
+// Lo que muestra una línea de la preparación. Un combo (lista de materiales tipo Conjunto en SAP) se prepara como sus
+// productos: cada uno va con su nombre y el del combo del que sale. lineasPedido: Map lineNum → línea del pedido.
+export function datosLinea(linea, lineasPedido, nombres = {}) {
+  const delPedido = lineasPedido.get(linea.pedidoLineNum) ?? {};
+  if (!linea.comboItemCode) return { ...delPedido, itemCode: linea.itemCode, uomCode: linea.uomCode };
+  return { itemCode: linea.itemCode, itemName: nombres[linea.itemCode] ?? null, uomCode: null,
+    warehouseCode: delPedido.warehouseCode ?? null, combo: nombres[linea.comboItemCode] ?? linea.comboItemCode };
+}
