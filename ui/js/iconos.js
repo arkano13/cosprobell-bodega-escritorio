@@ -26,6 +26,8 @@ const TRAZOS = {
   lista: ["M3 5h.01", "M3 12h.01", "M3 19h.01", "M8 5h13", "M8 12h13", "M8 19h13"], // list
   buscar: ["m21 21-4.34-4.34", { circle: { cx: 11, cy: 11, r: 8 } }], // search
   menu: ["M4 5h16", "M4 12h16", "M4 19h16"],
+  combo: [{ rect: { x: 3, y: 8, width: 18, height: 4, rx: 1 } }, "M12 8v13", "M19 12v7a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2v-7",
+    "M7.5 8a2.5 2.5 0 0 1 0-5A4.8 8 0 0 1 12 8a4.8 8 0 0 1 4.5-5 2.5 2.5 0 0 1 0 5"], // gift
   teclado: ["M10 8h.01", "M12 12h.01", "M14 8h.01", "M16 12h.01", "M18 8h.01", "M6 8h.01", "M7 16h10", "M8 12h.01",
     { rect: { width: 20, height: 16, x: 2, y: 4, rx: 2 } }], // keyboard
   operador: ["M19 21v-2a4 4 0 0 0-4-4H9a4 4 0 0 0-4 4v2", { circle: { cx: 12, cy: 7, r: 4 } }], // user
