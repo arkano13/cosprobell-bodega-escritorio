@@ -1,4 +1,5 @@
 import { crearApi } from "./api.js";
+import { crearActualizacionManual, presentacionManual } from "./sincronizacion-manual.js";
 import { crearColaLecturas } from "./lecturas.js";
 import { icono } from "./iconos.js";
 import { HORAS_EN_LISTA, datosLinea, pedidoConNombres, sigueEnLista, textosPreparado } from "./preparados.js";
@@ -1006,6 +1007,7 @@ async function vistaSupervisor(pestana = "etiquetas") {
   mostrarAmplio(navegacion("panel"),
     h("div", { class: "encabezado" }, h("h1", {}, "Panel del supervisor")), nav, mensaje, contenido);
   await panel.refrescar();
+  if (!contenido.isConnected) return;
   const secciones = { etiquetas: panelEtiquetas, operadores: panelOperadores, revisiones: panelRevisiones, sincronizacion: panelSincronizacion,
     almacenes: panelAlmacenes, reportes: panelReportes };
   await secciones[pestana](panel);
@@ -1262,12 +1264,27 @@ async function panelRevisiones(panel) {
 }
 
 async function panelSincronizacion(panel) {
+  let vigente = true;
+  let manual;
+  limpiezas.push(() => { vigente = false; manual?.detener(); });
+  const tarjeta = h("section", { class: "tarjeta", "aria-label": "Actualización manual de SAP" });
+  const progreso = h("div", { "aria-live": "polite", "aria-atomic": "true" });
+  const detalle = h("p", { class: "suave" });
+  const mensajeError = h("p", { class: "suave", role: "alert" });
+  const solicitar = boton("boton--principal", "sincronizar", "Actualizar productos, pedidos y existencias", { disabled: true, onclick: () => manual.solicitar() });
+  tarjeta.append(h("h2", {}, "Actualizar desde SAP"),
+    h("p", { class: "suave" }, "El puente atenderá la solicitud en su próxima ejecución. Con la programación actual puede tardar hasta 5 minutos en empezar; completar productos, pedidos y existencias puede tomar varias ejecuciones."),
+    solicitar, progreso, detalle, mensajeError);
+  const tabla = h("div");
+  panel.contenido.replaceChildren(tarjeta, tabla);
+  async function refrescarDatos() {
   let datos;
-  try { datos = (await api.sincronizacion()).data; } catch (error) { panel.contenido.replaceChildren(); return panel.fallo(error, () => vistaSupervisor("sincronizacion")); }
+  datos = (await api.sincronizacion()).data;
+  if (!vigente) return;
   const pedidos = datos.entidades.find((e) => e.entidad === "pedidos");
   const estadoPedidos = estadoDatos(pedidos);
   const INSIGNIAS = { ok: ["ok", "completa"], alerta: ["alerta", "alerta"], sin_datos: ["gris", null] };
-  panel.contenido.replaceChildren(
+  tabla.replaceChildren(
     estadoPedidos.tipo === "ok" ? aviso("ok", `El puente está enviando datos. Últimos pedidos de SAP ${hace(pedidos.ultimaRecepcion)}.`)
       : estadoPedidos.tipo === "alerta" ? aviso("alerta", `Los últimos pedidos de SAP llegaron ${hace(pedidos.ultimaRecepcion)}. Revisá que el puente esté funcionando.`)
         : aviso("alerta", "Todavía no llegaron datos de SAP."),
@@ -1282,6 +1299,24 @@ async function panelSincronizacion(panel) {
           h("td", {}, insignia(INSIGNIAS[s.tipo][0], INSIGNIAS[s.tipo][1], s.texto)));
       }))),
     h("p", { class: "suave panel__nota" }, `${datos.empresa ? `Sociedad de SAP: ${datos.empresa}. ` : ""}Aviso si los pedidos pasan más de 1 hora sin datos, y el resto más de 24 horas. Los límites se ajustan cuando se definan las frecuencias del puente.`));
+  }
+  manual = crearActualizacionManual({ api, alSalir: error => panel.fallo(error), alCompletar: refrescarDatos,
+    alCambiar(estadoManual) {
+      if (!vigente) return;
+      const p = presentacionManual(estadoManual);
+      solicitar.disabled = p.deshabilitado;
+      solicitar.replaceChildren(icono("sincronizar"), p.boton);
+      // No volver a anunciar el mismo estado en cada consulta.
+      if (progreso.textContent !== p.texto) progreso.replaceChildren(aviso(p.tipo, p.texto));
+      const d = estadoManual.datos, s = d?.solicitud;
+      detalle.textContent = [d?.ultimaConexion ? `Último contacto del puente: ${hace(d.ultimaConexion)}.` : "Todavía no hay contacto registrado del puente.",
+        s?.finalizadaEn ? `Finalizó: ${new Date(s.finalizadaEn).toLocaleString("es-HN")}.` : "",
+        s?.completas?.length ? `Completas: ${s.completas.map(e => NOMBRES_DATOS[e] ?? e).join(", ")}.` : ""].filter(Boolean).join(" ");
+      mensajeError.textContent = estadoManual.error && estadoManual.error.status !== 404
+        ? (estadoManual.error.mensaje ?? "No pudimos consultar el estado. Volveremos a intentarlo.") : "";
+    },
+  });
+  await Promise.all([manual.iniciar(), refrescarDatos().catch(error => { if (vigente) panel.fallo(error); })]);
 }
 
 // Reportes: cuadre con SAP de lo ya contado, en pantalla y en PDF.
