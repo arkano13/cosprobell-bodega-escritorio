@@ -3,7 +3,7 @@ const numero = (valor) => Number(valor).toLocaleString("es-HN");
 const hora = (iso) => new Date(iso).toLocaleTimeString("es-HN", { hour: "numeric", minute: "2-digit" });
 
 export const NOMBRES_DATOS = {
-  facturasPreparacion: "Facturas para preparar", pedidos: "Pedidos", clientes: "Clientes", productos: "Productos", unidades: "Unidades de medida", codigosBarras: "Códigos de barras",
+  facturasPreparacion: "Facturas para preparar", trasladosPreparacion: "Traslados para preparar", pedidos: "Pedidos", clientes: "Clientes", productos: "Productos", unidades: "Unidades de medida", codigosBarras: "Códigos de barras",
   almacenes: "Almacenes", existencias: "Existencias por almacén", documentos: "Entradas, salidas y devoluciones",
 };
 
@@ -41,7 +41,7 @@ export function estadoOperador(o) {
 
 export function textoRevision(r) {
   if (r.motivo === "CAMBIOS_EN_SAP" || r.motivo === "SIN_CAMBIOS") {
-    const documento = r.pedido?.fuenteDocumento === "factura" ? "la factura" : "el pedido";
+    const documento = r.pedido?.fuenteDocumento === "factura" ? "la factura" : r.pedido?.fuenteDocumento === "traslado" ? "el traslado" : "el pedido";
     const avance = `llevaba ${numero(r.unidadesPreparadas)} de ${numero(r.unidadesPedidas)} unidades`;
     const quien = r.operador ? `mientras ${r.operador} lo preparaba` : "mientras se preparaba";
     return r.motivo === "CAMBIOS_EN_SAP" ? `SAP cambió ${documento} ${quien} (${avance}).`

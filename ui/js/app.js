@@ -148,7 +148,16 @@ function escuchar(objetivo, evento, funcion) {
 }
 const cargando = (texto) => h("p", { class: "cargando" }, texto);
 let fuenteDocumentos = "pedido";
-const rotuloDocumento = (fuente = fuenteDocumentos) => fuente === "factura" ? "Factura" : "Pedido";
+const rotuloDocumento = (fuente = fuenteDocumentos) => fuente === "factura" ? "Factura" : fuente === "traslado" ? "Traslado" : "Pedido";
+// Factura y traslado de la 02: SAP ya los descontó; se preparan completos.
+const esSalidaSap = (fuente) => fuente === "factura" || fuente === "traslado";
+// Un traslado puede no tener cliente (por ejemplo, el almacén de un vendedor): se muestra su destino.
+const clienteDocumento = (p) => p.cliente?.cardName ?? p.cardCode ?? (p.almacenDestino ? `Almacén ${p.almacenDestino}` : "Sin cliente");
+const metaDocumento = (p) => p.fuenteDocumento === "traslado"
+  ? `Fecha ${fecha(p.docDate)} · De la 02 a la ${p.almacenDestino ?? "—"}`
+  : `Fecha ${fecha(p.docDate)} · ${p.fuenteDocumento === "factura" ? "Vencimiento" : "Entrega"} ${fecha(p.docDueDate)}`;
+const insigniaTraslado = (p) => p.fuenteDocumento === "traslado" && p.almacenDestino
+  && h("span", { class: "insignia insignia--traslado" }, `A la ${p.almacenDestino}`);
 const tituloPedido = (docNum, fuente) => h("h1", {}, h("span", { class: "rotulo" }, rotuloDocumento(fuente)), " ", String(docNum));
 const boton = (clase, nombreIcono, texto, atributos = {}) =>
   h("button", { class: `boton ${clase}`.trim(), type: "button", ...atributos }, nombreIcono && icono(nombreIcono), texto);
@@ -414,25 +423,26 @@ async function vistaPedidos() {
     listaPreparados);
 
   const tarjetaPendiente = (p) => h("li", {},
-    h("button", { class: "pedido", type: "button", onclick: () => vistaPedido(p.docEntry) },
+    h("button", { class: `pedido${p.fuenteDocumento === "traslado" ? " pedido--traslado" : ""}`, type: "button", onclick: () => vistaPedido(p.docEntry) },
       h("div", { class: "pedido__cabeza" },
-        h("div", { class: "pedido__numero" }, h("span", { class: "rotulo" }, rotuloDocumento()), " ", String(p.docNum)),
+        h("div", { class: "pedido__numero" }, h("span", { class: "rotulo" }, rotuloDocumento(p.fuenteDocumento)), " ", String(p.docNum)),
+        insigniaTraslado(p),
         icono("siguiente", "icono pedido__flecha")),
       h("div", { class: "pedido__cuerpo" },
-        h("div", { class: "pedido__cliente" }, p.cliente?.cardName ?? p.cardCode),
-        h("div", { class: "pedido__meta" }, `Fecha ${fecha(p.docDate)} · ${p.fuenteDocumento === "factura" ? "Vencimiento" : "Entrega"} ${fecha(p.docDueDate)}`),
+        h("div", { class: "pedido__cliente" }, clienteDocumento(p)),
+        h("div", { class: "pedido__meta" }, metaDocumento(p)),
         h("div", { class: "pedido__meta", "data-sap": p.sincronizadoEn }, `Datos de SAP ${hace(p.sincronizadoEn)}`))));
   function tarjetaPreparado(p) {
     const textos = textosPreparado(p.preparado);
     return h("li", {},
       h("button", { class: `pedido ${textos.completo ? "pedido--preparado" : "pedido--diferencias"}`, type: "button", onclick: () => verResumen(p) },
         h("div", { class: "pedido__cabeza" },
-          h("div", { class: "pedido__numero" }, h("span", { class: "rotulo" }, rotuloDocumento()), " ", String(p.docNum)),
+          h("div", { class: "pedido__numero" }, h("span", { class: "rotulo" }, rotuloDocumento(p.fuenteDocumento)), " ", String(p.docNum)),
           h("span", { class: "pedido__ver" }, "Ver resumen", icono("siguiente"))),
         h("div", { class: "pedido__cuerpo" },
           h("div", { class: "pedido__estado" }, h("span", { class: `insignia ${textos.completo ? "insignia--ok" : "insignia--alerta"}` },
             icono(textos.completo ? "completa" : "alerta"), textos.estado)),
-          h("div", { class: "pedido__cliente" }, p.cliente?.cardName ?? p.cardCode),
+          h("div", { class: "pedido__cliente" }, clienteDocumento(p)),
           textos.quien && h("div", { class: "pedido__quien" }, textos.quien),
           h("div", { class: "pedido__meta" }, textos.unidades))));
   }
@@ -518,7 +528,7 @@ async function vistaPedidos() {
 
   mostrarAmplio(navegacion("pedidos"),
     h("div", { class: "encabezado" },
-      h("div", {}, h("div", { class: "encabezado__titulo" }, h("h1", {}, fuenteDocumentos === "factura" ? "Facturas para preparar · 02" : "Pedidos abiertos"), contador), actualizado),
+      h("div", {}, h("div", { class: "encabezado__titulo" }, h("h1", {}, fuenteDocumentos === "factura" ? "Facturas y traslados · 02" : "Pedidos abiertos"), contador), actualizado),
       boton("", "actualizar", "Actualizar", { onclick: () => vistaPedidos() })),
     abierta, h("label", { class: "buscador" }, icono("buscar"), buscador), vacio, lista, seccionPreparados, masBoton);
   pintar();
@@ -592,8 +602,8 @@ async function vistaPedido(docEntry) {
     boton("boton--volver", "volver", "Preparaciones", { onclick: () => vistaPedidos() }),
     h("div", { class: "encabezado" }, tituloPedido(pedido.docNum, pedido.fuenteDocumento)),
     h("div", { class: "tarjeta detalle-pedido" }, h("span", { class: "rotulo" }, "Cliente"),
-      h("div", { class: "pedido__cliente" }, pedido.cliente?.cardName ?? pedido.cardCode),
-      h("div", { class: "pedido__meta" }, `Fecha ${fecha(pedido.docDate)} · ${pedido.fuenteDocumento === "factura" ? "Vencimiento" : "Entrega"} ${fecha(pedido.docDueDate)}`),
+      h("div", { class: "pedido__cliente" }, clienteDocumento(pedido)),
+      h("div", { class: "pedido__meta" }, metaDocumento(pedido)),
       h("div", { class: "pedido__meta" }, `Datos de SAP ${hace(pedido.sincronizadoEn)}`)),
     datosViejos(pedido.sincronizadoEn) && aviso("alerta",
       "Los datos de este documento tienen más de una hora sin actualizarse desde SAP. Confirmá con el supervisor antes de preparar."),
@@ -755,8 +765,10 @@ async function vistaEscaneo() {
     }
     const faltantes = sesion.lineas.filter((l) => l.cantidadEscaneada < l.cantidadPedida);
     const unidades = faltantes.reduce((s, l) => s + (l.cantidadPedida - l.cantidadEscaneada), 0);
-    if (pedido.fuenteDocumento === "factura" && faltantes.length) {
-      await informar({ titulo: "Factura incompleta", texto: "Debés preparar todas las unidades antes de finalizar esta factura." });
+    if (esSalidaSap(pedido.fuenteDocumento) && faltantes.length) {
+      const nombre = pedido.fuenteDocumento === "traslado" ? "este traslado" : "esta factura";
+      await informar({ titulo: `${rotuloDocumento(pedido.fuenteDocumento)} incompleto${pedido.fuenteDocumento === "traslado" ? "" : "a"}`,
+        texto: `Debés preparar todas las unidades antes de finalizar ${nombre}.` });
       return;
     }
     const ok = await confirmar(faltantes.length === 0
@@ -1222,7 +1234,7 @@ async function panelRevisiones(panel) {
   const { enRevision, conDiferencias, sinEntrega } = datos;
   const bloque = (titulo, n, ...hijos) => h("section", { class: "bloque" }, h("h2", {}, titulo, h("span", { class: "contador" }, numero(n))), ...hijos);
   const cuandoYQuien = (f) => [f.operador, f.fechaFin && fechaHora(f.fechaFin)].filter(Boolean).join(" · ");
-  const pedidoTexto = (f) => `${f.pedido.fuenteDocumento === "factura" ? "Factura" : "Pedido"} ${f.pedido.docNum ?? f.pedido.sapDocEntry ?? f.pedido.docEntry}${f.pedido.cliente ? ` · ${f.pedido.cliente}` : ""}`;
+  const pedidoTexto = (f) => `${rotuloDocumento(f.pedido.fuenteDocumento ?? "pedido")} ${f.pedido.docNum ?? f.pedido.sapDocEntry ?? f.pedido.docEntry}${f.pedido.cliente ? ` · ${f.pedido.cliente}` : ""}`;
 
   async function verResumen(f) {
     mostrar(cargando("Cargando resumen…"));
