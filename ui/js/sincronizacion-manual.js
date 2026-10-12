@@ -2,7 +2,8 @@ const enCurso = solicitud => ["pendiente", "sincronizando"].includes(solicitud?.
 
 export function presentacionManual({ datos, consultando, enviando, incierto, error }) {
   const s = datos?.solicitud;
-  const documentos = datos?.entidades?.includes("facturasPreparacion") ? "facturas" : "pedidos";
+  const documentos = datos?.entidades?.includes("facturasPreparacion")
+    ? (datos.entidades.includes("trasladosPreparacion") ? "facturas, traslados" : "facturas") : "pedidos";
   let texto = "Consultando disponibilidad…", tipo = "info";
   if (datos) {
     texto = `Podés actualizar productos, ${documentos} y existencias de los almacenes seleccionados.`;

@@ -326,6 +326,9 @@ h2 {
 .pedido--diferencias .pedido__cabeza { background: var(--alerta-fondo); border-bottom-color: var(--alerta-borde); }
 .pedido--diferencias:hover { border-color: var(--alerta); }
 .pedido--diferencias:active { background: var(--alerta-fondo); }
+/* Traslado de la 02 a otro almacén: misma tarjeta que una factura, con su destino a la vista. */
+.pedido--traslado { border-top-color: var(--accion); }
+.insignia--traslado { background: var(--lila); color: var(--tinta); }
 .pedido__ver { display: inline-flex; align-items: center; gap: 2px; font-size: 15px; font-weight: 700; color: var(--tinta-suave); white-space: nowrap; }
 .pedido__ver .icono { width: 22px; height: 22px; }
 .pedido__estado { margin-bottom: 10px; }

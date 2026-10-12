@@ -138,3 +138,11 @@ Identidad de Cosprobell en tono formal: morado de referencia (**#362F44**) en la
 
 - Cuánto tiempo sin actualizar se acepta: hoy avisa si los datos del pedido tienen más de una hora; los límites del panel se ajustan cuando se definan las frecuencias del puente.
 - Quién puede finalizar con diferencias: hoy cualquier equipo con clave puede hacerlo.
+
+## Traslados de la 02 (1.15.0)
+
+- Con facturas, la lista se llama **Facturas y traslados · 02**. Los traslados de SAP que salen de la 02 hacia otro
+  almacén (consigna, vendedores) aparecen como **Traslado N** con una insignia del destino ("A la C64").
+- Si el traslado no tiene cliente, la tarjeta muestra el almacén de destino.
+- Se prepara igual que una factura: unidad por unidad y completo ("Traslado incompleto" si faltan unidades).
+- En el panel del supervisor, Sincronización muestra "Traslados para preparar".
