@@ -2,7 +2,7 @@ import { crearApi } from "./api.js";
 import { crearActualizacionManual, presentacionManual } from "./sincronizacion-manual.js";
 import { crearColaLecturas } from "./lecturas.js";
 import { icono } from "./iconos.js";
-import { HORAS_EN_LISTA, sigueEnLista, textosPreparado } from "./preparados.js";
+import { HORAS_EN_LISTA, datosLinea, pedidoConNombres, sigueEnLista, textosPreparado } from "./preparados.js";
 import { NOMBRES_DATOS, estadoDatos, estadoOperador, puedeSerUnidad, quienConfirmo, textoCambio, textoRevision, textoSinEntrega, textoUnidad } from "./supervisor.js";
 import { ESTADOS, TEXTO_SIN_COMPARACION, armarAsignaciones, agruparEtiquetas, armarConteo, armarConteoCajas, conteoGuardadoAlmacen, conteoGuardadoGrande, cuerpoEdicionGrande, armarGrupos, armarLotesDespacho, armarLotesPequena, avanceConteo,
   cantidadMovimiento, diasParaVencer, esCodigoCaja, pareceCodigoBarras, estadoFila, estadoSap, filtrosBodega, filtrosExistencias, finDeMes, nombreBodega, nombreOpcion, opcionesDescuento,
@@ -147,7 +147,9 @@ function escuchar(objetivo, evento, funcion) {
   limpiezas.push(() => objetivo.removeEventListener(evento, funcion));
 }
 const cargando = (texto) => h("p", { class: "cargando" }, texto);
-const tituloPedido = (docNum) => h("h1", {}, h("span", { class: "rotulo" }, "Pedido"), " ", String(docNum));
+let fuenteDocumentos = "pedido";
+const rotuloDocumento = (fuente = fuenteDocumentos) => fuente === "factura" ? "Factura" : "Pedido";
+const tituloPedido = (docNum, fuente) => h("h1", {}, h("span", { class: "rotulo" }, rotuloDocumento(fuente)), " ", String(docNum));
 const boton = (clase, nombreIcono, texto, atributos = {}) =>
   h("button", { class: `boton ${clase}`.trim(), type: "button", ...atributos }, nombreIcono && icono(nombreIcono), texto);
 
@@ -178,7 +180,7 @@ function actualizarBarra() {
 // Secciones principales: pedidos, inventario y, para el supervisor, su panel.
 function navegacion(actual) {
   const secciones = [
-    { id: "pedidos", icono: "lista", texto: "Pedidos", ir: () => vistaPedidos() },
+    { id: "pedidos", icono: "lista", texto: "Preparaciones", ir: () => vistaPedidos() },
     { id: "inventario", icono: "bodega", texto: "Inventario", ir: () => vistaInventario(), n: estado.pendientesInventario },
     { id: "bodegas", icono: "capas", texto: "Bodegas", ir: () => vistaBodegas() },
     esSupervisor() && { id: "panel", icono: "escudo", texto: "Panel del supervisor", ir: () => vistaSupervisor() },
@@ -206,7 +208,7 @@ function mostrarError(error, reintentar) {
     aviso("error", error?.mensaje ?? "Ocurrió un error inesperado", { role: "alert" }),
     h("div", { class: "fila" },
       boton("boton--principal", "actualizar", "Reintentar", { onclick: reintentar }),
-      boton("", "volver", "Volver a pedidos", { onclick: () => vistaPedidos() }))));
+      boton("", "volver", "Volver a preparaciones", { onclick: () => vistaPedidos() }))));
 }
 
 // Diálogo de confirmación: resuelve true o false.
@@ -388,17 +390,18 @@ async function cambiarOperador() {
 // ---------------------------------------------------------------------------
 
 async function vistaPedidos() {
-  mostrarAmplio(navegacion("pedidos"), cargando("Cargando pedidos abiertos…"));
+  mostrarAmplio(navegacion("pedidos"), cargando("Cargando documentos para preparar…"));
   const pedidos = [];
   let cursor = null, paginas = 1, actualizadaEn = Date.now(), falloEn = null;
   try {
     const respuesta = await api.pedidos();
+    fuenteDocumentos = respuesta.fuente ?? fuenteDocumentos;
     pedidos.push(...respuesta.data); cursor = respuesta.siguienteCursor;
   } catch (error) { return mostrarError(error, vistaPedidos); }
 
-  const buscador = h("input", { class: "buscador__campo", type: "search", placeholder: "Buscar por número o cliente", "aria-label": "Buscar pedido" });
+  const buscador = h("input", { class: "buscador__campo", type: "search", placeholder: "Buscar por número o cliente", "aria-label": "Buscar documento" });
   const lista = h("ul", { class: "pedidos" });
-  const masBoton = boton("boton--ancho", null, "Cargar más pedidos");
+  const masBoton = boton("boton--ancho", null, "Cargar más documentos");
   const vacio = h("p", { class: "suave vacio" });
   const contador = h("span", { class: "contador" });
   const actualizado = h("p", { class: "actualizado" });
@@ -407,24 +410,24 @@ async function vistaPedidos() {
   const contadorPreparados = h("span", { class: "contador" });
   const seccionPreparados = h("section", { class: "preparados", "aria-labelledby": "titulo-preparados" },
     h("div", { class: "separador" }, h("h2", { id: "titulo-preparados" }, "Preparados"), contadorPreparados,
-      h("p", {}, `Salen de la lista cuando SAP cierra el pedido o ${HORAS_EN_LISTA} horas después de prepararse.`)),
+      h("p", {}, `Salen de esta lista ${HORAS_EN_LISTA} horas después de prepararse. El historial se conserva.`)),
     listaPreparados);
 
   const tarjetaPendiente = (p) => h("li", {},
     h("button", { class: "pedido", type: "button", onclick: () => vistaPedido(p.docEntry) },
       h("div", { class: "pedido__cabeza" },
-        h("div", { class: "pedido__numero" }, h("span", { class: "rotulo" }, "Pedido"), " ", String(p.docNum)),
+        h("div", { class: "pedido__numero" }, h("span", { class: "rotulo" }, rotuloDocumento()), " ", String(p.docNum)),
         icono("siguiente", "icono pedido__flecha")),
       h("div", { class: "pedido__cuerpo" },
         h("div", { class: "pedido__cliente" }, p.cliente?.cardName ?? p.cardCode),
-        h("div", { class: "pedido__meta" }, `Fecha ${fecha(p.docDate)} · Entrega ${fecha(p.docDueDate)}`),
+        h("div", { class: "pedido__meta" }, `Fecha ${fecha(p.docDate)} · ${p.fuenteDocumento === "factura" ? "Vencimiento" : "Entrega"} ${fecha(p.docDueDate)}`),
         h("div", { class: "pedido__meta", "data-sap": p.sincronizadoEn }, `Datos de SAP ${hace(p.sincronizadoEn)}`))));
   function tarjetaPreparado(p) {
     const textos = textosPreparado(p.preparado);
     return h("li", {},
       h("button", { class: `pedido ${textos.completo ? "pedido--preparado" : "pedido--diferencias"}`, type: "button", onclick: () => verResumen(p) },
         h("div", { class: "pedido__cabeza" },
-          h("div", { class: "pedido__numero" }, h("span", { class: "rotulo" }, "Pedido"), " ", String(p.docNum)),
+          h("div", { class: "pedido__numero" }, h("span", { class: "rotulo" }, rotuloDocumento()), " ", String(p.docNum)),
           h("span", { class: "pedido__ver" }, "Ver resumen", icono("siguiente"))),
         h("div", { class: "pedido__cuerpo" },
           h("div", { class: "pedido__estado" }, h("span", { class: `insignia ${textos.completo ? "insignia--ok" : "insignia--alerta"}` },
@@ -451,9 +454,9 @@ async function vistaPedidos() {
     contadorPreparados.setAttribute("aria-label", `${preparados.length} pedidos preparados`);
     contador.textContent = `${vigentes.length}${cursor === null ? "" : "+"}`;
     contador.setAttribute("aria-label", `${contador.textContent} pedidos cargados`);
-    vacio.textContent = !vigentes.length ? "No hay pedidos abiertos."
-      : !visibles.length ? "Ningún pedido coincide con la búsqueda."
-        : !pendientes.length && !filtro ? "Todos los pedidos abiertos ya están preparados." : "";
+    vacio.textContent = !vigentes.length ? "No hay documentos pendientes de preparación."
+      : !visibles.length ? "Ningún documento coincide con la búsqueda."
+        : !pendientes.length && !filtro ? "Todos los documentos de esta lista ya están preparados." : "";
     vacio.hidden = !vacio.textContent;
     masBoton.hidden = cursor === null;
     pintarActualizado();
@@ -503,7 +506,8 @@ async function vistaPedidos() {
     ocupado = true; masBoton.disabled = true;
     try {
       const respuesta = await api.pedidos(cursor);
-      pedidos.push(...respuesta.data); cursor = respuesta.siguienteCursor; paginas++;
+      fuenteDocumentos = respuesta.fuente ?? fuenteDocumentos;
+    pedidos.push(...respuesta.data); cursor = respuesta.siguienteCursor; paginas++;
       pintar();
     } catch (error) { if (error.status === 401) return mostrarError(error); }
     finally { ocupado = false; masBoton.disabled = false; }
@@ -514,7 +518,7 @@ async function vistaPedidos() {
 
   mostrarAmplio(navegacion("pedidos"),
     h("div", { class: "encabezado" },
-      h("div", {}, h("div", { class: "encabezado__titulo" }, h("h1", {}, "Pedidos abiertos"), contador), actualizado),
+      h("div", {}, h("div", { class: "encabezado__titulo" }, h("h1", {}, fuenteDocumentos === "factura" ? "Facturas para preparar · 02" : "Pedidos abiertos"), contador), actualizado),
       boton("", "actualizar", "Actualizar", { onclick: () => vistaPedidos() })),
     abierta, h("label", { class: "buscador" }, icono("buscar"), buscador), vacio, lista, seccionPreparados, masBoton);
   pintar();
@@ -533,7 +537,7 @@ async function vistaPedidos() {
 async function verResumen(p) {
   mostrar(cargando("Cargando resumen…"));
   try {
-    const [pedido, sesion] = await Promise.all([api.pedido(p.docEntry).then((r) => r.data), api.sesion(p.preparado.pickingId).then((r) => r.data)]);
+    const [pedido, sesion] = await Promise.all([api.pedido(p.docEntry).then(pedidoConNombres), api.sesion(p.preparado.pickingId).then((r) => r.data)]);
     vistaResumen(sesion, pedido);
   } catch (error) { mostrarError(error, () => verResumen(p)); }
 }
@@ -554,6 +558,7 @@ function tarjetaLinea(linea, nombre, { pedida, escaneada = null, reciente = fals
     h("div", { class: "linea__nombre" }, nombre.itemName ?? nombre.itemCode),
     h("div", { class: "linea__detalle" }, h("span", { class: "codigo" }, nombre.itemCode),
       [nombre.uomCode && `Unidad ${nombre.uomCode}`, nombre.warehouseCode && `Bodega ${nombre.warehouseCode}`].filter(Boolean).join(" · ")),
+    nombre.combo && h("div", { class: "linea__combo" }, icono("combo"), `Del combo ${nombre.combo}`),
     h("div", { class: "linea__cantidad" },
       escaneada === null ? cantidad(pedida) : [cantidad(escaneada), h("span", { class: "linea__total" }, ` / ${cantidad(pedida)}`)],
       completa ? h("span", { class: "insignia insignia--ok" }, icono("completa"), "Completa")
@@ -562,10 +567,12 @@ function tarjetaLinea(linea, nombre, { pedida, escaneada = null, reciente = fals
 }
 
 async function vistaPedido(docEntry) {
-  mostrar(cargando("Cargando pedido…"));
+  mostrar(cargando("Cargando documento…"));
   let respuesta;
   try { respuesta = await api.pedido(docEntry); } catch (error) { return mostrarError(error, () => vistaPedido(docEntry)); }
-  const { data: pedido, preparacion } = respuesta;
+  const { preparacion } = respuesta;
+  const pedido = pedidoConNombres(respuesta);
+  fuenteDocumentos = pedido.fuenteDocumento ?? fuenteDocumentos;
   const problema = aviso("error", preparacion.message ?? "", { role: "alert", hidden: preparacion.datosValidos });
   const empezar = boton("boton--principal boton--ancho boton--grande", "escaner", "Empezar preparación", { disabled: !preparacion.datosValidos });
   empezar.addEventListener("click", async () => {
@@ -582,18 +589,19 @@ async function vistaPedido(docEntry) {
   const lineasPorNumero = new Map(pedido.lineas.map((l) => [l.lineNum, l]));
   const aPreparar = preparacion.datosValidos ? preparacion.lineas : [];
   mostrar(
-    boton("boton--volver", "volver", "Pedidos", { onclick: () => vistaPedidos() }),
-    h("div", { class: "encabezado" }, tituloPedido(pedido.docNum)),
+    boton("boton--volver", "volver", "Preparaciones", { onclick: () => vistaPedidos() }),
+    h("div", { class: "encabezado" }, tituloPedido(pedido.docNum, pedido.fuenteDocumento)),
     h("div", { class: "tarjeta detalle-pedido" }, h("span", { class: "rotulo" }, "Cliente"),
       h("div", { class: "pedido__cliente" }, pedido.cliente?.cardName ?? pedido.cardCode),
-      h("div", { class: "pedido__meta" }, `Fecha ${fecha(pedido.docDate)} · Entrega ${fecha(pedido.docDueDate)}`),
+      h("div", { class: "pedido__meta" }, `Fecha ${fecha(pedido.docDate)} · ${pedido.fuenteDocumento === "factura" ? "Vencimiento" : "Entrega"} ${fecha(pedido.docDueDate)}`),
       h("div", { class: "pedido__meta" }, `Datos de SAP ${hace(pedido.sincronizadoEn)}`)),
     datosViejos(pedido.sincronizadoEn) && aviso("alerta",
-      "Los datos de este pedido tienen más de una hora sin actualizarse desde SAP. Confirmá con el supervisor antes de preparar."),
+      "Los datos de este documento tienen más de una hora sin actualizarse desde SAP. Confirmá con el supervisor antes de preparar."),
     problema,
+    pedido.fuenteDocumento === "factura" && pedido.lineas.some(l => l.cantidadCredito > 0) && aviso("info", "Las cantidades a preparar ya descuentan las notas de crédito vinculadas a esta factura."),
     aPreparar.length > 0 && h("h2", {}, "A preparar"),
     h("ul", { class: "lineas" }, aPreparar.map((l) =>
-      tarjetaLinea(l.pedidoLineNum, { ...lineasPorNumero.get(l.pedidoLineNum), uomCode: l.uomCode }, { pedida: l.cantidadPedida }))),
+      tarjetaLinea(l.pedidoLineNum, datosLinea(l, lineasPorNumero, pedido.nombres), { pedida: l.cantidadPedida }))),
     empezar);
 }
 
@@ -606,7 +614,7 @@ async function vistaEscaneo() {
   mostrar(cargando("Abriendo preparación…"));
   let pedido, sesion;
   try {
-    [pedido, sesion] = await Promise.all([api.pedido(docEntry).then((r) => r.data), api.sesion(pickingId).then((r) => r.data)]);
+    [pedido, sesion] = await Promise.all([api.pedido(docEntry).then(pedidoConNombres), api.sesion(pickingId).then((r) => r.data)]);
   } catch (error) {
     if (error.status === 404) { guardarSesion(null); return vistaPedidos(); }
     return mostrarError(error, vistaEscaneo);
@@ -620,10 +628,11 @@ async function vistaEscaneo() {
     guardado.borrar(`cola.${pickingId}`);
     lecturas = null;
     return mostrar(h("div", { class: "tarjeta" },
-      aviso("alerta", `El supervisor reinició la preparación del pedido ${pedido.docNum} porque SAP cambió el pedido. Empezala de nuevo desde la lista.`),
-      boton("boton--principal", "lista", "Ver pedidos", { onclick: () => vistaPedidos() })));
+      aviso("alerta", `El supervisor reinició la preparación del ${rotuloDocumento(pedido.fuenteDocumento).toLowerCase()} ${pedido.docNum} porque SAP cambió el documento. Empezala de nuevo desde la lista.`),
+      boton("boton--principal", "lista", "Ver preparaciones", { onclick: () => vistaPedidos() })));
   }
   guardarSesion({ ...estado.sesion, docNum: pedido.docNum });
+  fuenteDocumentos = pedido.fuenteDocumento ?? fuenteDocumentos;
   const lineasPedido = new Map(pedido.lineas.map((l) => [l.lineNum, l]));
   let lineaReciente = null;
 
@@ -657,8 +666,7 @@ async function vistaEscaneo() {
       h("span", { class: "suave" }, pendientesTexto(lineas.filter((l) => l.cantidadEscaneada < l.cantidadPedida).length)));
     // Primero las pendientes; las completas quedan al final.
     const orden = [...lineas].sort((a, b) => (a.cantidadEscaneada >= a.cantidadPedida) - (b.cantidadEscaneada >= b.cantidadPedida));
-    lista.replaceChildren(...orden.map((l) => tarjetaLinea(l.pedidoLineNum,
-      { ...lineasPedido.get(l.pedidoLineNum), itemCode: l.itemCode, uomCode: l.uomCode },
+    lista.replaceChildren(...orden.map((l) => tarjetaLinea(l.pedidoLineNum, datosLinea(l, lineasPedido, pedido.nombres),
       { pedida: l.cantidadPedida, escaneada: l.cantidadEscaneada, reciente: l.id === lineaReciente })));
     const activa = sesion.estado === "en_proceso";
     entrada.disabled = !activa;
@@ -689,7 +697,7 @@ async function vistaEscaneo() {
   }
 
   function nombreDe(linea) {
-    return lineasPedido.get(linea.pedidoLineNum)?.itemName ?? linea.itemCode;
+    return datosLinea(linea, lineasPedido, pedido.nombres).itemName ?? linea.itemCode;
   }
 
   const registro = colaDe(pickingId);
@@ -747,6 +755,10 @@ async function vistaEscaneo() {
     }
     const faltantes = sesion.lineas.filter((l) => l.cantidadEscaneada < l.cantidadPedida);
     const unidades = faltantes.reduce((s, l) => s + (l.cantidadPedida - l.cantidadEscaneada), 0);
+    if (pedido.fuenteDocumento === "factura" && faltantes.length) {
+      await informar({ titulo: "Factura incompleta", texto: "Debés preparar todas las unidades antes de finalizar esta factura." });
+      return;
+    }
     const ok = await confirmar(faltantes.length === 0
       ? { titulo: "Finalizar preparación", texto: "Todas las líneas están completas.", aceptar: "Finalizar" }
       : { titulo: "Finalizar con faltantes", peligro: true, aceptar: "Finalizar con diferencias",
@@ -772,7 +784,7 @@ async function vistaEscaneo() {
 
   mostrarAmplio(
     h("div", { class: "encabezado" }, h("div", {},
-      tituloPedido(pedido.docNum),
+      tituloPedido(pedido.docNum, pedido.fuenteDocumento),
       h("div", { class: "encabezado__sub" }, pedido.cliente?.cardName ?? pedido.cardCode))),
     datosViejos(pedido.sincronizadoEn) && aviso("alerta",
       `Datos de SAP ${hace(pedido.sincronizadoEn)}. Confirmá con el supervisor si el pedido sigue igual.`),
@@ -898,7 +910,8 @@ async function mostrarLecturas(pickingId) {
 // Resumen al finalizar
 // ---------------------------------------------------------------------------
 
-function vistaResumen(sesion, pedido, volver = { texto: "Volver a pedidos", accion: () => vistaPedidos() }) {
+function vistaResumen(sesion, pedido, volver = { texto: "Volver a preparaciones", accion: () => vistaPedidos() }) {
+  fuenteDocumentos = pedido.fuenteDocumento ?? fuenteDocumentos;
   const lineasPedido = new Map(pedido.lineas.map((l) => [l.lineNum, l]));
   const faltantes = sesion.lineas.filter((l) => l.cantidadEscaneada < l.cantidadPedida);
   const completo = sesion.estado === "completo";
@@ -906,7 +919,7 @@ function vistaResumen(sesion, pedido, volver = { texto: "Volver a pedidos", acci
   const preparadas = sesion.lineas.reduce((s, l) => s + Math.min(l.cantidadEscaneada, l.cantidadPedida), 0);
   const dato = (titulo, valor, cifra = false) => h("div", {}, h("dt", {}, titulo), h("dd", { class: cifra ? "datos__cifra" : null }, valor));
   mostrar(
-    h("div", { class: "encabezado" }, h("div", {}, tituloPedido(pedido.docNum),
+    h("div", { class: "encabezado" }, h("div", {}, tituloPedido(pedido.docNum, pedido.fuenteDocumento),
       h("div", { class: "encabezado__sub" }, pedido.cliente?.cardName ?? pedido.cardCode))),
     h("section", { class: `tarjeta cierre ${completo ? "cierre--completo" : "cierre--diferencias"}`, "aria-label": "Resumen de la preparación" },
       h("div", { class: "cierre__cabeza" },
@@ -922,8 +935,7 @@ function vistaResumen(sesion, pedido, volver = { texto: "Volver a pedidos", acci
         sesion.fechaInicio && dato("Inicio", fechaHora(sesion.fechaInicio)),
         sesion.fechaFin && dato("Fin", fechaHora(sesion.fechaFin)))),
     faltantes.length > 0 && h("div", { class: "tarjeta" }, h("h2", {}, "Faltantes"),
-      h("ul", { class: "lineas" }, faltantes.map((l) => tarjetaLinea(l.pedidoLineNum,
-        { ...lineasPedido.get(l.pedidoLineNum), itemCode: l.itemCode, uomCode: l.uomCode },
+      h("ul", { class: "lineas" }, faltantes.map((l) => tarjetaLinea(l.pedidoLineNum, datosLinea(l, lineasPedido, pedido.nombres),
         { pedida: l.cantidadPedida, escaneada: l.cantidadEscaneada })))),
     boton("boton--principal boton--ancho boton--grande", "volver", volver.texto, { onclick: volver.accion }));
 }
@@ -1210,12 +1222,12 @@ async function panelRevisiones(panel) {
   const { enRevision, conDiferencias, sinEntrega } = datos;
   const bloque = (titulo, n, ...hijos) => h("section", { class: "bloque" }, h("h2", {}, titulo, h("span", { class: "contador" }, numero(n))), ...hijos);
   const cuandoYQuien = (f) => [f.operador, f.fechaFin && fechaHora(f.fechaFin)].filter(Boolean).join(" · ");
-  const pedidoTexto = (f) => `Pedido ${f.pedido.docNum ?? f.pedido.docEntry}${f.pedido.cliente ? ` · ${f.pedido.cliente}` : ""}`;
+  const pedidoTexto = (f) => `${f.pedido.fuenteDocumento === "factura" ? "Factura" : "Pedido"} ${f.pedido.docNum ?? f.pedido.sapDocEntry ?? f.pedido.docEntry}${f.pedido.cliente ? ` · ${f.pedido.cliente}` : ""}`;
 
   async function verResumen(f) {
     mostrar(cargando("Cargando resumen…"));
     try {
-      const [pedido, sesion] = await Promise.all([api.pedido(f.pedido.docEntry).then((r) => r.data), api.sesion(f.pickingId).then((r) => r.data)]);
+      const [pedido, sesion] = await Promise.all([api.pedido(f.pedido.docEntry).then(pedidoConNombres), api.sesion(f.pickingId).then((r) => r.data)]);
       vistaResumen(sesion, pedido, { texto: "Volver al panel", accion: () => vistaSupervisor("revisiones") });
     } catch (error) { mostrarError(error, () => verResumen(f)); }
   }
@@ -1235,7 +1247,7 @@ async function panelRevisiones(panel) {
 
   const tarjetaRevision = (r) => h("div", { class: "tarjeta revision" },
     h("div", { class: "fila fila--entre" },
-      h("div", {}, h("span", { class: "rotulo" }, "Pedido"), h("div", { class: "revision__numero" }, String(r.pedido.docNum ?? r.pedido.docEntry)),
+      h("div", {}, h("span", { class: "rotulo" }, rotuloDocumento()), h("div", { class: "revision__numero" }, String(r.pedido.docNum ?? r.pedido.docEntry)),
         r.pedido.cliente && h("div", { class: "encabezado__sub" }, r.pedido.cliente)),
       h("div", { class: "fila-admin__acciones" },
         boton("", "lista", "Ver lecturas", { onclick: () => mostrarLecturas(r.pickingId) }),
@@ -1271,30 +1283,31 @@ async function panelSincronizacion(panel) {
   const progreso = h("div", { "aria-live": "polite", "aria-atomic": "true" });
   const detalle = h("p", { class: "suave" });
   const mensajeError = h("p", { class: "suave", role: "alert" });
-  const solicitar = boton("boton--principal", "sincronizar", "Actualizar productos, pedidos y existencias", { disabled: true, onclick: () => manual.solicitar() });
+  const solicitar = boton("boton--principal", "sincronizar", "Actualizar productos, documentos y existencias", { disabled: true, onclick: () => manual.solicitar() });
   tarjeta.append(h("h2", {}, "Actualizar desde SAP"),
-    h("p", { class: "suave" }, "El puente atenderá la solicitud en su próxima ejecución. Con la programación actual puede tardar hasta 5 minutos en empezar; completar productos, pedidos y existencias puede tomar varias ejecuciones."),
+    h("p", { class: "suave" }, "El puente atenderá la solicitud en su próxima ejecución. Con la programación actual puede tardar hasta 5 minutos en empezar; completar productos, documentos y existencias puede tomar varias ejecuciones."),
     solicitar, progreso, detalle, mensajeError);
   const tabla = h("div");
   panel.contenido.replaceChildren(tarjeta, tabla);
   async function refrescarDatos() {
   let datos;
   datos = (await api.sincronizacion()).data;
+    fuenteDocumentos = datos.fuentePreparacion ?? fuenteDocumentos;
   if (!vigente) return;
   const pedidos = datos.entidades.find((e) => e.entidad === "pedidos");
   const estadoPedidos = estadoDatos(pedidos);
   const INSIGNIAS = { ok: ["ok", "completa"], alerta: ["alerta", "alerta"], sin_datos: ["gris", null] };
   tabla.replaceChildren(
-    estadoPedidos.tipo === "ok" ? aviso("ok", `El puente está enviando datos. Últimos pedidos de SAP ${hace(pedidos.ultimaRecepcion)}.`)
-      : estadoPedidos.tipo === "alerta" ? aviso("alerta", `Los últimos pedidos de SAP llegaron ${hace(pedidos.ultimaRecepcion)}. Revisá que el puente esté funcionando.`)
+    estadoPedidos.tipo === "ok" ? aviso("ok", `El puente está enviando datos. Últimos documentos para preparar de SAP ${hace(pedidos.ultimaRecepcion)}.`)
+      : estadoPedidos.tipo === "alerta" ? aviso("alerta", `Los últimos documentos para preparar de SAP llegaron ${hace(pedidos.ultimaRecepcion)}. Revisá que el puente esté funcionando.`)
         : aviso("alerta", "Todavía no llegaron datos de SAP."),
     h("table", { class: "tabla" },
       h("thead", {}, h("tr", {}, ["Datos de SAP", "Última recepción", "Registros", "Estado"].map((t) => h("th", { scope: "col" }, t)))),
       h("tbody", {}, datos.entidades.map((e) => {
         const s = estadoDatos(e);
-        return h("tr", {}, h("th", { scope: "row" }, NOMBRES_DATOS[e.entidad] ?? e.entidad),
+        return h("tr", {}, h("th", { scope: "row" }, e.nombre ?? NOMBRES_DATOS[e.entidad] ?? e.entidad),
           h("td", {}, e.ultimaRecepcion ? hace(e.ultimaRecepcion) : "—"),
-          h("td", { class: "tabla__numero" }, e.entidad === "pedidos" ? `${numero(e.registros)} abiertos`
+          h("td", { class: "tabla__numero" }, e.entidad === "pedidos" ? `${numero(e.registros)} documentos`
             : e.entidad === "existencias" ? `${numero(e.registros)} productos` : numero(e.registros)),
           h("td", {}, insignia(INSIGNIAS[s.tipo][0], INSIGNIAS[s.tipo][1], s.texto)));
       }))),
