@@ -80,6 +80,9 @@ Reglas:
 - **No hay "dar de baja"** en la app: lo vencido o dañado se registra primero en SAP y después aparece en Falta marcar salida.
 - **Solo el supervisor**: cambiar el lote de una salida, editar el conteo de la 01 (el formulario del conteo con lo guardado) y de la 02 (por lote: una fila por cada lote que el sistema conoce y **Agregar un lote** para los que no están), corregir las unidades de una caja y ver lo que SAP tiene en cualquier almacén (**Panel → Almacenes → Ver productos**: en stock, comprometido, pedido y disponible). Las correcciones quedan como diferencia con SAP si no coinciden. Una salida de antes del control por lotes que salió de la 02 no se puede cambiar de lote.
 
+
+Con facturas, lo **facturado sin preparar** (SAP ya lo descontó y sigue en la 02 hasta terminar la preparación) no cuenta como diferencia: la ficha del producto lo dice y el reporte de cuadre lo muestra como "−N facturadas" junto a lo contado en la 02. Si SAP anula una factura ya preparada, su mercadería vuelve sola a la 02, al mismo lote (movimiento **Devuelto por anulación**).
+
 ## Bodegas
 
 Sección propia (arriba, junto a Pedidos e Inventario), para operadores y supervisor: lo que tiene cada almacén marcado de esta bodega.

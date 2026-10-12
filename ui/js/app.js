@@ -1423,7 +1423,9 @@ function tablaCuadre(lista) {
     h("tbody", {}, lista.map((x) => h("tr", {},
       h("td", { class: "codigo" }, x.itemCode), h("th", { scope: "row" }, x.itemName),
       num(x.grande.contado), num(x.grande.sap, " suave"), dif(x.grande.diferencia),
-      h("td", { class: "tabla__numero" }, numero(x.pequena.contado), x.pequena.sinEntrega ? h("small", { class: "suave" }, ` +${numero(x.pequena.sinEntrega)} sin entregar`) : ""),
+      h("td", { class: "tabla__numero" }, numero(x.pequena.contado),
+        x.pequena.sinEntrega ? h("small", { class: "suave" }, ` +${numero(x.pequena.sinEntrega)} sin entregar`) : "",
+        x.pequena.porPreparar ? h("small", { class: "suave" }, ` −${numero(x.pequena.porPreparar)} facturadas`) : ""),
       num(x.pequena.sap, " suave"), dif(x.pequena.diferencia), dif(x.diferencia, true))))));
 }
 
@@ -1459,7 +1461,7 @@ const volverA = (texto, accion) => boton("boton--volver", "volver", texto, { onc
 const volverInventario = () => volverA("Inventario", () => vistaInventario());
 const enteroPositivo = (valor, minimo = 1) => Number.isInteger(valor) && valor >= minimo && valor <= 1_000_000;
 const ICONO_MOVIMIENTO = { recepcion: "caja", reposicion: "mover", traspaso: "mover", picking: "lista", descuento: "restar", reasignacion: "actualizar",
-  conteo: "contar", correccion: "contar" };
+  conteo: "contar", correccion: "contar", anulacion: "actualizar" };
 
 function mostrarInventario(...nodos) { mostrarAmplio(navegacion("inventario"), ...nodos); }
 function mostrarBodegas(...nodos) { mostrarAmplio(navegacion("bodegas"), ...nodos); }
@@ -1768,6 +1770,7 @@ async function vistaProducto(itemCode, mensaje = null) {
     h("div", { class: "fila acciones-producto" }, acciones),
     h("p", { class: "estado-producto__texto" }, textoEstado(e),
       e?.sinEntrega > 0 ? ` Hay ${unidadesTexto(e.sinEntrega)} preparadas sin entregar.` : "",
+      e?.porPreparar > 0 ? ` Hay ${unidadesTexto(e.porPreparar)} facturadas sin preparar: SAP ya las descontó y siguen en ${bodegaNombre("pequena", { corto: true })}.` : "",
       p.porPasar > 0 ? ` SAP pasó ${unidadesTexto(p.porPasar)} a ${bodegaNombre("pequena", { corto: true })}: falta aceptar de qué lotes.` : ""),
     h("div", { class: "bodegas ficha-bodegas" },
       tarjeta("grande", "caja", enGrande, cajasGrande ? `en ${numero(cajasGrande)} ${cajasGrande === 1 ? "caja" : "cajas"}` : "", resumenLotes(p.lotes, true)),

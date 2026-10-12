@@ -245,6 +245,7 @@ test("inventario: textos del estado frente a SAP, movimientos y documentos", () 
   assert.equal(cantidadMovimiento({ tipo: "conteo", grande: 0, pequena: 0, cajas: 0, observacion: "Contado: no hay" }), "No hay");
   assert.equal(textoMovimiento({ tipo: "conteo" }), "Conteo");
   assert.equal(textoMovimiento({ tipo: "picking", docNum: 91004 }), "Salida por pedido 91004");
+  assert.equal(textoMovimiento({ tipo: "anulacion", docNum: 1002 }), "Devuelto por anulación 1002");
   assert.equal(cantidadMovimiento({ tipo: "reposicion", grande: -24, pequena: 24 }), "24 u. a la pequeña");
   assert.equal(cantidadMovimiento({ tipo: "reposicion", grande: -24, pequena: 24 }, BODEGAS), "24 u. a la 02");
   assert.equal(cantidadMovimiento({ tipo: "recepcion", grande: 1000, pequena: 0, cajas: 50 }), "50 cajas · 1,000 u.");
