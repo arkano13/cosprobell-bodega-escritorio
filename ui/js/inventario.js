@@ -125,11 +125,11 @@ export function diasParaVencer(iso, hoy = new Date()) {
 
 export const NOMBRES_MOVIMIENTO = {
   recepcion: "Entrada", reposicion: "Reposición", traspaso: "Traspaso de SAP", picking: "Salida por pedido", descuento: "Descuento de SAP",
-  reasignacion: "Cambio de lote", conteo: "Conteo", correccion: "Corrección de caja",
+  reasignacion: "Cambio de lote", conteo: "Conteo", correccion: "Corrección de caja", anulacion: "Devuelto por anulación",
 };
 export function textoMovimiento(m) {
   const nombre = NOMBRES_MOVIMIENTO[m.tipo] ?? m.tipo;
-  return m.tipo === "picking" && m.docNum ? `${nombre} ${m.docNum}` : nombre;
+  return (m.tipo === "picking" || m.tipo === "anulacion") && m.docNum ? `${nombre} ${m.docNum}` : nombre;
 }
 // Cantidad que mostró el movimiento: la reposición pasa de una bodega a la otra (no cambia el total).
 export function cantidadMovimiento(m, bodegas = null) {
