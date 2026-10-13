@@ -663,3 +663,42 @@ test("API de preparación conserva la identidad interna de una factura y su DocE
   assert.match(rutas[0][0], /\/pedidos\/-10$/);
   assert.equal(JSON.parse(rutas[1][1]).pedidoDocEntry, -10);
 });
+
+test("reportes de bodega: duración, rango de días, antigüedad, alcance, documento y nombre del PDF", async () => {
+  const { duracion, textoRango, diaCorto, haceDias, alcanza, textoDocumentoReporte, nombreArchivoReporte, porcentajeDecimal, horasConActividad } =
+    await import("../ui/js/reportes.js");
+  assert.deepEqual([duracion(460), duracion(65), duracion(3920), duracion(null)], ["7:40", "1:05", "1:05:20", "—"]);
+  assert.equal(textoRango("2026-10-07", "2026-10-13"), "Del 7 al 13 de octubre");
+  assert.equal(textoRango("2026-09-28", "2026-10-04"), "Del 28 de septiembre al 4 de octubre");
+  assert.equal(textoRango("2026-10-13", "2026-10-13"), "Martes 13 de octubre");
+  assert.equal(diaCorto("2026-10-07"), "Mié 7");
+  assert.deepEqual([haceDias(0), haceDias(1), haceDias(5), haceDias(null)], ["hoy", "hace 1 día", "hace 5 días", "—"]);
+  assert.deepEqual([alcanza(0), alcanza(2), alcanza(9), alcanza(null)], [{ texto: "Menos de 1 día", tono: "error" }, { texto: "2 días", tono: "alerta" },
+    { texto: "9 días", tono: "ok" }, { texto: "—", tono: "gris" }]);
+  assert.equal(textoDocumentoReporte({ fuente: "traslado", docNum: 2219, almacenDestino: "C64" }), "Traslado 2219 · a la C64");
+  assert.equal(textoDocumentoReporte({ fuente: "factura", docNum: 10452, almacenDestino: "C64" }), "Factura 10452");
+  assert.match(nombreArchivoReporte("Más salen", "2026-10-13T21:20:00Z"), /^Reporte-Mas-salen-2026-10-1\d-\d{4}\.pdf$/);
+  assert.equal(porcentajeDecimal(3.1), `${(3.1).toLocaleString("es-HN")} %`);
+  const horas = horasConActividad(Array.from({ length: 24 }, (_, hora) => ({ hora, cantidad: hora === 18 ? 4 : 0 })));
+  assert.deepEqual([horas[0].hora, horas.at(-1).hora], [7, 18]);
+});
+
+test("api: los reportes de bodega mandan solo los filtros con valor", async () => {
+  const rutas = [];
+  const api = crearApi({ token: "t", fetchImpl: async (url) => { rutas.push(url); return Response.json({ data: {} }); } });
+  await api.reporte("preparaciones", { periodo: "7d", operador: "", documento: "todos" });
+  await api.reporte("pendientes", { minDias: 0 });
+  await api.reporte("actividad", { dia: "", persona: "Ana López" });
+  await api.reportePreparacion(12);
+  assert.deepEqual(rutas, ["/supervisor/reportes/preparaciones?periodo=7d&documento=todos", "/supervisor/reportes/pendientes?minDias=0",
+    "/supervisor/reportes/actividad?persona=Ana+L%C3%B3pez", "/supervisor/reportes/preparaciones/12"]);
+});
+
+test("reportes de bodega: el gráfico por día pasa a semanas con más de 14 días", async () => {
+  const { columnasPorDia, numeroSemana } = await import("../ui/js/reportes.js");
+  assert.equal(numeroSemana("2026-10-13"), 42);
+  const dias = (n) => Array.from({ length: n }, (_, i) => ({ fecha: new Date(Date.UTC(2026, 8, 14 + i)).toISOString().slice(0, 10), completas: 1, conDiferencias: i % 2 }));
+  assert.deepEqual(columnasPorDia(dias(2)).map((c) => c.rotulo), ["Lun 14", "Mar 15"]);
+  const semanas = columnasPorDia(dias(30));
+  assert.deepEqual(semanas.map((c) => [c.rotulo, c.completas]), [["S38", 7], ["S39", 7], ["S40", 7], ["S41", 7], ["S42", 2]]);
+});

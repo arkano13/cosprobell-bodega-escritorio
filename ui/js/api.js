@@ -71,6 +71,13 @@ export function crearApi({ token, base = "", fetchImpl = (...args) => globalThis
     anularRevision: (pickingId) => pedir("POST", `/supervisor/revisiones/${pickingId}/anulacion`),
     sincronizacion: () => pedir("GET", "/supervisor/sincronizacion"),
     reporteCuadre: () => pedir("GET", "/supervisor/reportes/cuadre"),
+    // Reportes de bodega: ruta (preparaciones, errores, salidas, reposiciones, correcciones, pendientes, actividad) y
+    // filtros; los vacíos no se envían.
+    reporte: (ruta, filtros = {}) => {
+      const consulta = new URLSearchParams(Object.entries(filtros).filter(([, v]) => v !== null && v !== undefined && v !== "").map(([k, v]) => [k, String(v)]));
+      return pedir("GET", `/supervisor/reportes/${ruta}${consulta.size ? `?${consulta}` : ""}`);
+    },
+    reportePreparacion: (pickingId) => pedir("GET", `/supervisor/reportes/preparaciones/${pickingId}`),
     solicitudSincronizacion: () => pedir("GET", "/supervisor/sincronizacion/solicitud"),
     actualizarTodo: () => pedir("POST", "/supervisor/sincronizacion/solicitud", {}),
     almacenes: () => pedir("GET", "/supervisor/almacenes"),
