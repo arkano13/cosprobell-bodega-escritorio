@@ -9,6 +9,7 @@ import { ESTADOS, TEXTO_SIN_COMPARACION, armarAsignaciones, agruparEtiquetas, ar
   pasosPuestaEnMarcha, quien, filasTraspaso, resumenTraspaso, cajasDeLaGrande, cajasEscaneadas, lotesParaEscanear, venceDespues, resumenRecepcion, revisarDespacho, sugerirAsignacion, textoAsignacion, textoContado, textoDocumento, textoEstado, textoLoteBodega,
   textoMovimiento, textoPorVencer, textoVencimiento, unidadesPorProducto } from "./inventario.js";
 import { conSigno, destacadosCuadre, nombreArchivoCuadre, notaCuadre, porcentaje, unidadesConSigno } from "./reportes.js";
+import { REPORTES, crearReportesBodega } from "./reportes-bodega.js";
 import { crearOperacion } from "./operaciones.js";
 import { barras } from "./code128.js";
 
@@ -1344,15 +1345,58 @@ async function panelSincronizacion(panel) {
   await Promise.all([manual.iniciar(), refrescarDatos().catch(error => { if (vigente) panel.fallo(error); })]);
 }
 
-// Reportes: cuadre con SAP de lo ya contado, en pantalla y en PDF.
+// Reportes: el cuadre con SAP y los reportes de bodega (reportes-bodega.js), en pantalla y en PDF. El reporte elegido
+// queda mientras la app está abierta.
+let reporteElegido = "cuadre";
+let reportesBodega = null;
 async function panelReportes(panel) {
+  reportesBodega ??= crearReportesBodega({ h, boton, aviso, icono, cargando, insignia, api, fechaHora, horaCorta,
+    guardarPdf: guardarReportePdf, irAPendientes: (pestana) => vistaPendientes(pestana) });
+  const zona = h("div", {});
+  const selector = h("div", { class: "filtros reporte-selector", role: "group", "aria-label": "Reporte" });
+  const elegir = (id) => {
+    reporteElegido = id;
+    panel.avisar(null, "");
+    selector.replaceChildren(...REPORTES.map((x) => h("button", { class: "filtro", type: "button", "aria-pressed": x.id === id ? "true" : "false",
+      onclick: () => elegir(x.id) }, x.texto)));
+    if (id === "cuadre") return panelCuadre(panel, zona);
+    return reportesBodega.mostrar(zona, id, panel);
+  };
+  panel.contenido.replaceChildren(selector, zona);
+  await elegir(reporteElegido);
+}
+
+// Arma la hoja del PDF de un reporte de bodega en la zona de impresión y la guarda (la app pregunta dónde).
+async function guardarReportePdf({ titulo, sub, nodos, nombre, pie }) {
+  const hoja = h("div", { class: "hoja-reporte hoja-reporte--bodega" },
+    h("header", { class: "hoja-reporte__portada" },
+      h("p", { class: "hoja-reporte__marca" }, "Bodega · Reportes"),
+      h("h1", {}, titulo),
+      h("p", { class: "hoja-reporte__sub" }, sub)),
+    ...nodos.filter(Boolean));
+  const zona = zonaImpresion();
+  zona.replaceChildren(hoja);
+  try {
+    await document.fonts.ready;
+    return await window.escritorio.guardarPdf({ nombre, pie });
+  } catch {
+    return { ok: false, motivo: "error" };
+  } finally {
+    zona.replaceChildren();
+  }
+}
+
+// Cuadre con SAP de lo ya contado.
+async function panelCuadre(panel, zona) {
+  zona.replaceChildren(cargando("Cargando el reporte…"));
   let r;
   try { r = (await api.reporteCuadre()).data; } catch (error) {
-    panel.contenido.replaceChildren();
-    if (["ALMACENES_SIN_ELEGIR", "BODEGAS_SIN_ALMACEN"].includes(error?.codigo)) return panel.contenido.replaceChildren(aviso("alerta", error.mensaje),
+    zona.replaceChildren();
+    if (["ALMACENES_SIN_ELEGIR", "BODEGAS_SIN_ALMACEN"].includes(error?.codigo)) return zona.replaceChildren(aviso("alerta", error.mensaje),
       boton("", "bodega", "Ir a Almacenes", { onclick: () => vistaSupervisor("almacenes") }));
     return panel.fallo(error, () => vistaSupervisor("reportes"));
   }
+  if (!zona.isConnected) return;
   recordarBodegas(r.bodegas);
   const descargar = boton("boton--principal", "impresora", "Descargar PDF", { onclick: async () => {
     panel.avisar(null, "");
@@ -1364,10 +1408,10 @@ async function panelReportes(panel) {
     else if (!resultado.cancelado) panel.avisar("error", "No se pudo guardar el PDF. Probá de nuevo.");
   } });
   if (!window.escritorio?.guardarPdf) descargar.hidden = true;
-  panel.contenido.replaceChildren(
+  zona.replaceChildren(
     h("div", { class: "reporte__encabezado" },
       h("div", {}, h("h2", {}, "Cuadre con SAP"), h("p", { class: "suave" }, textoMomentoCuadre(r))),
-      h("div", { class: "fila" }, boton("", "actualizar", "Actualizar", { onclick: () => vistaSupervisor("reportes") }), descargar)),
+      h("div", { class: "fila" }, boton("", "actualizar", "Actualizar", { onclick: () => panelCuadre(panel, zona) }), descargar)),
     ...contenidoCuadre(r));
 }
 

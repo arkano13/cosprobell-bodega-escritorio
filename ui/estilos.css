@@ -967,6 +967,110 @@ h2 {
 .tabla-cuadre--almacen tbody th { min-width: 260px; }
 @media (max-width: 1000px) { .reporte-cifras { grid-template-columns: 1fr; } }
 
+/* Reportes de bodega (reportes-bodega.js) */
+.reporte-selector { margin: 0 0 20px; }
+.reporte-filtros { display: flex; flex-wrap: wrap; align-items: flex-end; gap: 14px 28px; margin: 0 0 18px; padding: 14px 18px;
+  background: var(--superficie); border: 1px solid var(--linea); border-radius: var(--radio); }
+.reporte-filtro { display: grid; gap: 6px; }
+.reporte-filtro .filtros { margin: 0; }
+.reporte-filtro__rotulo { font-size: 14px; font-weight: 700; color: var(--tinta); }
+.reporte-filtro .campo { min-height: 44px; min-width: 220px; }
+.reporte-cifras--4 { grid-template-columns: repeat(4, minmax(0, 1fr)); }
+.reporte-cifra--accion { border-top-color: var(--accion); } .reporte-cifra--accion strong { color: var(--tinta); }
+.reporte-cifra--gris { border-top-color: var(--borde-control); } .reporte-cifra--gris strong { color: var(--tinta); }
+.reporte-seccion--accion h3::before { background: var(--accion); }
+.reporte-seccion--alerta h3::before { background: var(--alerta); }
+.reporte-seccion--gris h3::before { background: var(--borde-control); }
+.reporte-dos { display: grid; grid-template-columns: minmax(0, 3fr) minmax(0, 2fr); gap: 0 22px; align-items: start; }
+.reporte-dos > * { min-width: 0; }
+.reporte-seccion__titulo > p { margin: 0 0 10px; }
+
+.grafico { margin: 0; padding: 14px 16px 10px; background: var(--superficie); border: 1px solid var(--linea); border-radius: var(--radio); }
+.grafico__leyenda { display: flex; flex-wrap: wrap; gap: 6px 18px; margin: 0 0 10px; padding: 0; list-style: none; font-size: 14px; font-weight: 600; }
+.grafico__leyenda li { display: inline-flex; align-items: center; gap: 6px; }
+.grafico__muestra { width: 12px; height: 12px; border-radius: 3px; }
+.grafico__columnas { display: flex; align-items: stretch; gap: 10px; height: 200px; }
+.grafico__columna { flex: 1 1 0; min-width: 0; display: grid; grid-template-rows: auto 1fr auto; gap: 4px; text-align: center; }
+.grafico__valor { font-family: var(--letra-titulo); font-size: 16px; font-weight: 700; min-height: 20px; }
+.grafico__pila { display: flex; flex-direction: column-reverse; justify-content: flex-start; border-bottom: 2px solid var(--linea); }
+.grafico__parte { display: block; width: 100%; min-height: 2px; }
+.grafico__parte:last-child { border-radius: 4px 4px 0 0; }
+.grafico__rotulo { font-size: 13px; color: var(--tinta-suave); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.grafico__muestra--accion, .grafico__parte--accion { background: var(--accion); }
+.grafico__muestra--alerta, .grafico__parte--alerta { background: var(--alerta); }
+.grafico__muestra--lila, .grafico__parte--lila { background: var(--lila-fuerte); }
+
+.medidor { display: inline-block; flex: 1 1 auto; height: 10px; min-width: 80px; background: var(--lila); border-radius: 999px; overflow: hidden; vertical-align: middle; }
+.medidor__relleno { display: block; height: 100%; border-radius: 999px; background: var(--accion); }
+.medidor__relleno--error { background: var(--error); }
+.medidor__relleno--alerta { background: var(--alerta); }
+.tabla-reporte th, .tabla-reporte td { padding: 10px 12px; font-size: 15px; }
+.tabla-reporte thead th { font-size: 12px; }
+.tabla-reporte tbody th small { display: block; font-weight: 500; font-size: 13px; }
+.tabla-reporte .codigo { white-space: nowrap; color: var(--tinta-suave); }
+.tabla-reporte__medidor { min-width: 180px; }
+.tabla-reporte__medidor > * { margin-right: 10px; }
+.tabla-reporte__elegida > * { background: var(--lila-claro); }
+
+.reporte-antiguedad { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; margin: 0 0 12px; }
+.reporte-antiguedad--4 { grid-template-columns: repeat(4, minmax(0, 1fr)); }
+.reporte-antiguedad__caja { display: grid; gap: 2px; padding: 8px 10px; background: var(--superficie); border: 1px solid var(--linea);
+  border-top: 4px solid var(--accion); border-radius: var(--radio-chico); }
+.reporte-antiguedad__caja span { font-size: 13px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.06em; color: var(--tinta-suave); }
+.reporte-antiguedad__caja strong { font-family: var(--letra-titulo); font-size: 30px; line-height: 1; }
+.reporte-antiguedad__caja--alerta { border-top-color: var(--alerta); background: var(--alerta-fondo); }
+.reporte-antiguedad__caja--error { border-top-color: var(--error); background: var(--error-fondo); }
+.reporte-antiguedad__caja--error strong { color: var(--error); }
+.reporte-cola, .reporte-motivos, .reporte-acciones, .reporte-lecturas, .reporte-productos { display: grid; gap: 0; margin: 0; padding: 0; list-style: none; }
+.reporte-cola li, .reporte-acciones li { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 10px 2px; border-bottom: 1px solid var(--linea); }
+.reporte-acciones li { display: grid; grid-template-columns: 96px minmax(0, 1fr) auto; }
+.reporte-acciones .codigo, .reporte-leida .codigo { white-space: nowrap; }
+.reporte-motivos li { padding: 8px 0 10px; }
+.reporte-motivos__fila { display: flex; justify-content: space-between; gap: 12px; margin: 0 0 6px; }
+.reporte-motivos .medidor { display: block; }
+
+.reporte-ficha { margin: 0 0 22px; padding: 18px 22px; background: var(--superficie); border: 1px solid var(--linea); border-left: 6px solid var(--accion); border-radius: var(--radio); }
+.reporte-ficha--alerta { border-left-color: var(--alerta); } .reporte-ficha--error { border-left-color: var(--error); } .reporte-ficha--ok { border-left-color: var(--ok); }
+.reporte-ficha h2, .reporte-ficha h3 { margin: 0; font-family: var(--letra-titulo); font-size: 30px; font-weight: 800; }
+.reporte-ficha__titulo { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 14px; }
+.reporte-ficha__bajada { margin: 4px 0 14px; font-size: 18px; font-weight: 700; }
+.reporte-ficha__datos { display: grid; grid-template-columns: repeat(6, minmax(0, 1fr)); gap: 12px; padding-top: 14px; border-top: 1px solid var(--linea); }
+.reporte-dato { display: grid; gap: 2px; }
+.reporte-dato strong { font-size: 18px; }
+.reporte-producto { display: flex; justify-content: space-between; gap: 12px; margin: 0 0 8px; padding: 12px 14px; background: var(--ok-fondo);
+  border: 1px solid var(--ok-borde); border-left: 5px solid var(--ok); border-radius: var(--radio-chico); }
+.reporte-producto--falta { background: var(--superficie); border-color: var(--alerta-borde); border-left-color: var(--alerta); }
+.reporte-producto small { display: block; }
+.reporte-producto__cuenta { text-align: right; white-space: nowrap; font-family: var(--letra-titulo); font-size: 20px; }
+.reporte-producto__cuenta strong { font-size: 30px; color: var(--ok-texto); }
+.reporte-producto--falta .reporte-producto__cuenta strong { color: var(--tinta); }
+.reporte-producto__cuenta small { font-family: var(--letra); font-size: 13px; font-weight: 700; color: var(--alerta-texto); }
+.reporte-leida { display: grid; grid-template-columns: 22px minmax(0, 1fr) auto; gap: 10px; align-items: start; padding: 9px 0; border-bottom: 1px solid var(--linea); }
+.reporte-leida .icono { width: 20px; height: 20px; margin-top: 2px; }
+.reporte-leida--aceptado .icono { color: var(--ok); }
+.reporte-leida--rechazado .icono, .reporte-leida--rechazado small { color: var(--error); }
+.reporte-leida small { display: block; font-size: 14px; }
+.reporte-cambio { white-space: nowrap; }
+.reporte-cambio del { display: block; color: var(--tinta-suave); }
+.reporte-cambio strong { display: block; color: var(--alerta-texto); }
+.reporte-pendientes { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 14px; margin: 0 0 18px; }
+.reporte-pendiente { padding: 14px 16px; background: var(--superficie); border: 1px solid var(--linea); border-top: 5px solid var(--alerta); border-radius: var(--radio); }
+.reporte-pendiente__titulo { display: flex; justify-content: space-between; align-items: baseline; gap: 10px; }
+.reporte-pendiente__titulo h3 { margin: 0 0 10px; font-size: 20px; }
+.reporte-pendiente__titulo > strong { font-family: var(--letra-titulo); font-size: 40px; line-height: 1; color: var(--alerta-texto); }
+.reporte-pendiente > p { margin: 0; font-size: 14px; }
+.reporte-mini { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; margin: 14px 0; }
+.reporte-mini > div { display: grid; gap: 2px; padding: 10px 12px; background: var(--lila-claro); border-radius: var(--radio-chico); }
+.reporte-mini strong { font-family: var(--letra-titulo); font-size: 30px; line-height: 1; }
+.reporte-mini span { font-size: 14px; }
+.reporte-ficha .grafico { border: 0; padding: 0; }
+.reporte-ficha .grafico__columnas { height: 120px; gap: 4px; }
+@media (max-width: 1200px) {
+  .reporte-cifras--4, .reporte-pendientes { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .reporte-dos { grid-template-columns: 1fr; }
+  .reporte-ficha__datos { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+}
+
 @media print {
   @page reporte { size: Letter; margin: 14mm 12mm 16mm; }
   .hoja-reporte { page: reporte; font-size: 10.5pt; line-height: 1.4; color: var(--tinta); }
@@ -1007,6 +1111,26 @@ h2 {
   .hoja-reporte .reporte-almacen > p { font-size: 9.5pt; }
   .hoja-reporte .reporte-almacen__cifras { font-size: 10.5pt; }
   .hoja-reporte .tabla-cuadre--almacen tbody th { width: 50%; }
+  /* Reportes de bodega: las secciones siguen en la misma hoja; solo se evita cortar filas, tarjetas y gráficos. */
+  .hoja-reporte--bodega .reporte-cifras--4 { grid-template-columns: repeat(4, minmax(0, 1fr)); }
+  .hoja-reporte--bodega .reporte-seccion { margin: 5mm 0 0; break-before: auto; }
+  .hoja-reporte--bodega .reporte-seccion h3 { font-size: 15pt; }
+  .hoja-reporte--bodega .reporte-seccion__titulo { break-after: avoid; break-inside: avoid; }
+  .hoja-reporte--bodega .reporte-seccion__titulo > p { font-size: 9.5pt; }
+  .hoja-reporte--bodega .reporte-dos { grid-template-columns: minmax(0, 3fr) minmax(0, 2fr); gap: 0 5mm; }
+  .hoja-reporte--bodega .reporte-pendientes { grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 3mm; }
+  .hoja-reporte--bodega .reporte-ficha__datos { grid-template-columns: repeat(6, minmax(0, 1fr)); }
+  .hoja-reporte--bodega .grafico, .hoja-reporte--bodega .reporte-ficha, .hoja-reporte--bodega .reporte-pendiente,
+  .hoja-reporte--bodega .reporte-producto, .hoja-reporte--bodega .reporte-leida, .hoja-reporte--bodega li { break-inside: avoid; }
+  .hoja-reporte--bodega .grafico__columnas { height: 42mm; }
+  .hoja-reporte--bodega .tabla-reporte { border: 0; box-shadow: none; overflow: visible; }
+  .hoja-reporte--bodega .tabla-reporte thead { display: table-header-group; }
+  .hoja-reporte--bodega .tabla-reporte tr { break-inside: avoid; }
+  .hoja-reporte--bodega .tabla-reporte th, .hoja-reporte--bodega .tabla-reporte td { padding: 1.3mm 1.6mm; font-size: 8.6pt; line-height: 1.3; }
+  .hoja-reporte--bodega .tabla-reporte thead th { font-size: 7.8pt; background: none; border-bottom: 1.5px solid var(--tinta); }
+  .hoja-reporte--bodega .tabla-reporte tbody tr:nth-child(even) > * { background: #faf9fc; }
+  .hoja-reporte--bodega .tabla-reporte__medidor { min-width: 0; }
+  .hoja-reporte--bodega .insignia { font-size: 7pt; padding: 0.4mm 1.6mm; }
 }
 
 /* ---------- Descuentos ---------- */
