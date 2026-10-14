@@ -86,3 +86,11 @@ test("un fallo de lectura conserva el avance, sin anunciar que la sincronizació
   assert.equal(f.estado().datos.solicitud.estado, "sincronizando");
   assert.equal(presentacionManual(f.estado()).deshabilitado, true); f.c.detener();
 });
+
+test("el botón nombra lo que va a pedir: facturas y traslados", async () => {
+  const { presentacionManual } = await import("../ui/js/sincronizacion-manual.js");
+  const p = presentacionManual({ datos: { entidades: ["facturasPreparacion", "trasladosPreparacion"], solicitud: null } });
+  assert.equal(p.boton, "Actualizar facturas y traslados");
+  assert.equal(p.texto, "Podés actualizar facturas y traslados.");
+  assert.equal(p.deshabilitado, false);
+});

@@ -1034,6 +1034,7 @@ h2 {
 .reporte-ficha--alerta { border-left-color: var(--alerta); } .reporte-ficha--error { border-left-color: var(--error); } .reporte-ficha--ok { border-left-color: var(--ok); }
 .reporte-ficha h2, .reporte-ficha h3 { margin: 0; font-family: var(--letra-titulo); font-size: 30px; font-weight: 800; }
 .reporte-ficha__titulo { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 14px; }
+.reporte-ficha__cliente { margin: 4px 0 0; font-size: 17px; }
 .reporte-ficha__bajada { margin: 4px 0 14px; font-size: 18px; font-weight: 700; }
 .reporte-ficha__datos { display: grid; grid-template-columns: repeat(6, minmax(0, 1fr)); gap: 12px; padding-top: 14px; border-top: 1px solid var(--linea); }
 .reporte-dato { display: grid; gap: 2px; }
@@ -1042,6 +1043,7 @@ h2 {
   border: 1px solid var(--ok-borde); border-left: 5px solid var(--ok); border-radius: var(--radio-chico); }
 .reporte-producto--falta { background: var(--superficie); border-color: var(--alerta-borde); border-left-color: var(--alerta); }
 .reporte-producto small { display: block; }
+.reporte-producto__lotes { margin-top: 4px; font-weight: 600; color: var(--tinta); }
 .reporte-producto__cuenta { text-align: right; white-space: nowrap; font-family: var(--letra-titulo); font-size: 20px; }
 .reporte-producto__cuenta strong { font-size: 30px; color: var(--ok-texto); }
 .reporte-producto--falta .reporte-producto__cuenta strong { color: var(--tinta); }

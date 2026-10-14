@@ -1296,9 +1296,9 @@ async function panelSincronizacion(panel) {
   const progreso = h("div", { "aria-live": "polite", "aria-atomic": "true" });
   const detalle = h("p", { class: "suave" });
   const mensajeError = h("p", { class: "suave", role: "alert" });
-  const solicitar = boton("boton--principal", "sincronizar", "Actualizar productos, documentos y existencias", { disabled: true, onclick: () => manual.solicitar() });
+  const solicitar = boton("boton--principal", "sincronizar", "Actualizar documentos para preparar", { disabled: true, onclick: () => manual.solicitar() });
   tarjeta.append(h("h2", {}, "Actualizar desde SAP"),
-    h("p", { class: "suave" }, "El puente atenderá la solicitud en su próxima ejecución. Con la programación actual puede tardar hasta 5 minutos en empezar; completar productos, documentos y existencias puede tomar varias ejecuciones."),
+    h("p", { class: "suave" }, "La solicitud se atenderá en la próxima ejecución programada del puente. El botón indica los datos que se actualizarán. Si hay muchos documentos, puede necesitar varias ejecuciones."),
     solicitar, progreso, detalle, mensajeError);
   const tabla = h("div");
   panel.contenido.replaceChildren(tarjeta, tabla);

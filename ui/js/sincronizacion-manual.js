@@ -2,11 +2,13 @@ const enCurso = solicitud => ["pendiente", "sincronizando"].includes(solicitud?.
 
 export function presentacionManual({ datos, consultando, enviando, incierto, error }) {
   const s = datos?.solicitud;
-  const documentos = datos?.entidades?.includes("facturasPreparacion")
-    ? (datos.entidades.includes("trasladosPreparacion") ? "facturas, traslados" : "facturas") : "pedidos";
+  const nombres = { productos: "productos", pedidos: "pedidos", facturasPreparacion: "facturas", trasladosPreparacion: "traslados",
+    existencias: "existencias", clientes: "clientes", unidades: "unidades de medida", almacenes: "almacenes",
+    codigosBarras: "códigos de barras", listasMateriales: "combos" };
+  const alcance = new Intl.ListFormat("es", { type: "conjunction" }).format((datos?.entidades ?? []).map(e => nombres[e] ?? e));
   let texto = "Consultando disponibilidad…", tipo = "info";
   if (datos) {
-    texto = `Podés actualizar productos, ${documentos} y existencias de los almacenes seleccionados.`;
+    texto = `Podés actualizar ${alcance}.`;
     if (!datos.entidades?.length) texto = "Falta actualizar y ejecutar el puente para habilitar esta función.";
     if (s?.estado === "pendiente") texto = "Solicitud guardada. Esperando al puente.";
     if (s?.estado === "sincronizando") texto = `Actualizando: ${s.completas.length} de ${s.entidades.length} entidades completas. Puede continuar en varias ejecuciones.`;
@@ -16,7 +18,7 @@ export function presentacionManual({ datos, consultando, enviando, incierto, err
   if (incierto) { texto = "No pudimos confirmar la solicitud. Estamos consultando su estado antes de permitir otro intento."; tipo = "alerta"; }
   if (error?.status === 404) { texto = "Falta actualizar el backend para habilitar esta función."; tipo = "alerta"; }
   return { texto, tipo, deshabilitado: consultando || enviando || incierto || !datos?.entidades?.length || enCurso(s) || Boolean(error),
-    boton: enviando ? "Solicitando…" : enCurso(s) ? "Actualización en curso" : `Actualizar productos, ${documentos} y existencias` };
+    boton: enviando ? "Solicitando…" : enCurso(s) ? "Actualización en curso" : alcance ? `Actualizar ${alcance}` : "Actualizar documentos" };
 }
 
 // Solo consultas mientras la vista está abierta. El POST no se reintenta solo:

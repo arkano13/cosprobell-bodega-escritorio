@@ -139,6 +139,7 @@ export function crearReportesBodega(d) {
     return [
       h("div", { class: `reporte-ficha reporte-ficha--${estadoP.tono}` },
         h("div", { class: "reporte-ficha__titulo" }, h("h2", {}, textoDocumentoReporte(r.documento).toUpperCase()), tono(estadoP.tono, estadoP.texto.toUpperCase())),
+        r.documento.cliente && h("p", { class: "suave reporte-ficha__cliente" }, r.documento.cliente),
         h("p", { class: "reporte-ficha__bajada" }, falta ? `Faltaron ${plural(r.faltan.unidades, "unidad", "unidades")} de ${plural(r.faltan.productos, "producto", "productos")}.`
           : r.estado === "anulada" ? `La anuló ${r.anuladoPor?.persona ?? "el supervisor"}${r.anuladoPor ? ` el ${fechaHora(r.anuladoPor.fecha)}` : ""}.` : "Se preparó todo lo pedido."),
         h("div", { class: "reporte-ficha__datos" }, datoD("Operador", r.operador ?? "—"), datoD("Unidades", `${numero(r.unidades.preparadas)} de ${numero(r.unidades.pedidas)}`),
@@ -147,7 +148,9 @@ export function crearReportesBodega(d) {
       h("div", { class: "reporte-dos" },
         seccion("accion", "Productos", null, h("ul", { class: "reporte-productos" }, r.productos.map((p) => h("li", { class: `reporte-producto${p.falta ? " reporte-producto--falta" : ""}` },
           h("div", {}, h("strong", {}, p.itemName ?? p.itemCode), h("div", {}, h("span", { class: "codigo codigo--barras" }, p.codigo ?? p.itemCode), " ", h("span", { class: "suave" }, p.uomCode ?? "")),
-            p.combo && h("small", { class: "suave" }, `Del combo ${p.combo.itemName ?? p.combo.itemCode}`)),
+            p.combo && h("small", { class: "suave" }, `Del combo ${p.combo.itemName ?? p.combo.itemCode}`),
+            p.lotes?.length > 0 && h("small", { class: "reporte-producto__lotes" }, p.lotes.map((l) =>
+              `${l.lote ? `Lote ${l.lote}` : "Sin lote"}${l.vencimiento ? ` · vence ${textoVencimiento(l.vencimiento)}` : ""} · ${plural(l.unidades, "unidad", "unidades")}`).join(" | "))),
           h("div", { class: "reporte-producto__cuenta" }, h("strong", {}, numero(p.preparada)), ` / ${numero(p.pedida)}`,
             p.falta > 0 && h("small", {}, `Faltan ${numero(p.falta)}`)))))),
         seccion("accion", `Lecturas · ${numero(r.lecturas.total)}`, `${plural(r.lecturas.aceptadas, "aceptada", "aceptadas")} · ${plural(r.lecturas.rechazadas, "rechazada", "rechazadas")}. Las más recientes primero.`,
