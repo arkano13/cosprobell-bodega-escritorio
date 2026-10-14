@@ -165,3 +165,8 @@ export function columnasPorDia(porDia) {
   }
   return [...semanas.values()];
 }
+
+// Vencimientos: tono de cada tramo, fecha "20/11/2026" y mes "nov 26".
+export const TRAMO_VENCIMIENTO = { vencido: { tono: "error" }, en30: { tono: "alerta" }, en60: { tono: "rol" }, en90: { tono: "gris" }, mas: { tono: "gris" } };
+export const textoVencimiento = (fecha) => (fecha ? `${fecha.slice(8, 10)}/${fecha.slice(5, 7)}/${fecha.slice(0, 4)}` : "—");
+export const mesCorto = (mes) => `${MESES[Number(mes.slice(5, 7)) - 1].slice(0, 3)} ${mes.slice(2, 4)}`;

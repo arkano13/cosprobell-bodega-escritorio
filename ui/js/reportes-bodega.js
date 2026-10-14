@@ -1,6 +1,7 @@
 // Reportes de bodega del panel del supervisor (además del Cuadre con SAP): cada uno con sus filtros, tarjetas, frases
 // destacadas, gráficos y tablas, en pantalla y en PDF. Los textos sin DOM están en reportes.js (con pruebas).
-import { ESTADO_PREPARACION, MOTIVO_LECTURA, TIPO_CAMBIO, CLASE_PENDIENTE, TIPO_ACCION, alcanza, columnasPorDia, duracion, haceDias,
+import { ESTADO_PREPARACION, MOTIVO_LECTURA, TIPO_CAMBIO, CLASE_PENDIENTE, TIPO_ACCION, TRAMO_VENCIMIENTO, alcanza, columnasPorDia, duracion, haceDias,
+  mesCorto, textoVencimiento,
   horasConActividad, nombreArchivoReporte, porcentajeDecimal, textoDocumentoReporte, textoRango } from "./reportes.js";
 
 export const REPORTES = [
@@ -12,6 +13,7 @@ export const REPORTES = [
   { id: "correcciones", texto: "Correcciones", titulo: "Correcciones y ajustes" },
   { id: "pendientes", texto: "Pendientes atrasados", titulo: "Pendientes que se atrasan" },
   { id: "actividad", texto: "Actividad", titulo: "Actividad por operador" },
+  { id: "vencimientos", texto: "Vencimientos", titulo: "Vencimientos" },
 ];
 
 const PERIODOS = { hoy: "Hoy", "7d": "7 días", "30d": "30 días", "60d": "60 días", "90d": "90 días", mes: "Este mes" };
@@ -26,6 +28,7 @@ export function crearReportesBodega(d) {
     preparaciones: { periodo: "7d", operador: "", documento: "todos" }, errores: { periodo: "30d", operador: "" },
     salidas: { periodo: "30d", limite: 20 }, reposiciones: { periodo: "60d", como: "todas" },
     correcciones: { periodo: "30d", tipo: "todos", persona: "" }, pendientes: { minDias: 3 }, actividad: { dia: "", persona: "" },
+    vencimientos: { dias: 90, donde: "todas" },
   };
 
   // ---------- Piezas comunes ----------
@@ -36,7 +39,7 @@ export function crearReportesBodega(d) {
   const periodos = (id, opciones, alCambiar) => grupo("Período", ...opciones.map((p) =>
     chip(PERIODOS[p], filtros[id].periodo === p, () => alCambiar({ periodo: p }))));
   const selector = (rotulo, valor, opciones, alCambiar) => {
-    const id = `filtro-${rotulo.toLowerCase().replace(/[^a-z]+/g, "-")}`;
+    const id = `filtro-${rotulo.normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase().replace(/[^a-z]+/g, "-")}`;
     const campo = h("select", { id, class: "campo campo--select", onchange: (e) => alCambiar(e.target.value) },
       opciones.map(([v, texto]) => h("option", { value: v, selected: String(v) === String(valor) ? true : null }, texto)));
     return h("div", { class: "reporte-filtro" }, h("label", { class: "reporte-filtro__rotulo", for: id }, rotulo), campo);
@@ -357,7 +360,41 @@ export function crearReportesBodega(d) {
     },
   };
 
-  const DEFINICIONES = { preparaciones, errores, salidas, reposiciones, correcciones, pendientes, actividad };
+  // ---------- 9. Vencimientos ----------
+  const vencimientos = {
+    cargar: () => api.reporte("vencimientos", filtros.vencimientos),
+    sub: (r) => `Ahora · lotes vencidos y los que vencen en los próximos ${numero(r.filtros.dias)} días · generado el ${fechaHora(r.generadoEn)}`,
+    filtros: (r, cambiar) => [grupo("Vencen en", ...[[30, "30 días"], [60, "60 días"], [90, "90 días"], [180, "6 meses"], [365, "1 año"]]
+      .map(([v, texto]) => chip(texto, filtros.vencimientos.dias === v, () => cambiar({ dias: v })))),
+    selector("Dónde", filtros.vencimientos.donde, [["todas", "Todas las bodegas"], ...r.filtros.lugares.map((a) => [a, `La ${a}`])], (v) => cambiar({ donde: v }))],
+    contenido(r) {
+      const s = r.resumen;
+      const tabla_ = (lista) => tabla(["Vence", "Código", "Producto", "Dónde", "Lote", { texto: "Cajas", numero: true }, { texto: "Unidades", numero: true }, "Falta"],
+        lista.map((l) => { const t = TRAMO_VENCIMIENTO[l.tramo];
+          return h("tr", {}, h("td", { class: "codigo" }, textoVencimiento(l.vencimiento)), codigo(l.codigo ?? l.itemCode), h("th", { scope: "row" }, l.itemName ?? l.itemCode,
+            l.contadoEn && h("small", { class: "suave" }, `Según el conteo del ${new Date(l.contadoEn).toLocaleDateString("es-HN")}`)),
+          h("td", {}, `La ${l.almacen}`), h("td", { class: "codigo" }, l.lote ?? "Sin lote"), num(l.enCajas && l.cajas ? l.cajas : "—"), num(l.unidades),
+          h("td", {}, tono(t.tono, (l.dias < 0 ? `Venció hace ${plural(-l.dias, "día", "días")}` : l.dias === 0 ? "Vence hoy" : `${plural(l.dias, "día", "días")}`).toUpperCase()))); }));
+      return [
+        cifras(cifra("menos", numero(s.vencido.unidades), "Vencidas", plural(s.vencido.lotes, "lote", "lotes")),
+          cifra("mas", numero(s.en30.unidades), "Vencen en 30 días", plural(s.en30.lotes, "lote", "lotes")),
+          cifra("accion", numero(s.en60.unidades + s.en90.unidades + s.mas.unidades), "Más adelante", `${plural(s.en60.lotes + s.en90.lotes + s.mas.lotes, "lote", "lotes")} dentro del plazo`),
+          cifra("gris", numero(s.sinFecha.unidades), "Sin fecha", `${plural(s.sinFecha.productos, "producto", "productos")} sin vencimiento cargado`)),
+        destacados(r.destacados),
+        seccion("accion", "Por mes de vencimiento", "Unidades que vencen cada mes.", columnas(r.porMes.map((m) => ({ rotulo: m.mes === "vencido" ? "Vencido" : mesCorto(m.mes),
+          partes: [{ valor: m.unidades, tono: m.mes === "vencido" ? "error" : "accion" }] })), { descripcion: "Unidades que vencen por mes" })),
+        seccion("menos", `Vencidos · ${numero(r.vencidos.length)}`, "Del más viejo al más nuevo. Hay que sacarlos de la venta.", r.vencidos.length ? tabla_(r.vencidos) : vacio("Ninguno.")),
+        seccion("alerta", `Por vencer · ${numero(r.porVencer.length)}`, "Del más próximo al más lejano.", r.porVencer.length ? tabla_(r.porVencer) : vacio("Nada vence en este plazo.")),
+        r.pasarPrimero.length > 0 && seccion("accion", `Pasar primero a la 02 · ${numero(r.pasarPrimero.length)}`, "En estos productos la 01 tiene un lote que vence antes que todos los de la 02.",
+          tabla(["Producto", "Lote en la 01", "Vence", "Lote en la 02", "Vence"], r.pasarPrimero.map((p) => h("tr", {}, h("th", { scope: "row" }, p.itemName ?? p.itemCode),
+            h("td", { class: "codigo" }, p.loteGrande ?? "Sin lote"), h("td", { class: "codigo" }, textoVencimiento(p.venceGrande)),
+            h("td", { class: "codigo" }, p.lotePequena ?? "Sin lote"), h("td", { class: "codigo" }, textoVencimiento(p.vencePequena)))))),
+        r.sinFecha.length > 0 && h("p", { class: "suave reporte-nota" }, `Sin fecha de vencimiento: ${r.sinFecha.map((x) => `la ${x.almacen}, ${plural(x.unidades, "unidad", "unidades")}`).join(" · ")}. Se carga al contar o recibir.`),
+      ];
+    },
+  };
+
+  const DEFINICIONES = { preparaciones, errores, salidas, reposiciones, correcciones, pendientes, actividad, vencimientos };
 
   // Muestra un reporte en el contenedor. alVolver: para el detalle de una preparación.
   async function mostrar(contenedor, id, panel) {

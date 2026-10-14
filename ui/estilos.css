@@ -999,6 +999,7 @@ h2 {
 .grafico__muestra--accion, .grafico__parte--accion { background: var(--accion); }
 .grafico__muestra--alerta, .grafico__parte--alerta { background: var(--alerta); }
 .grafico__muestra--lila, .grafico__parte--lila { background: var(--lila-fuerte); }
+.grafico__muestra--error, .grafico__parte--error { background: var(--error); }
 
 .medidor { display: inline-block; flex: 1 1 auto; height: 10px; min-width: 80px; background: var(--lila); border-radius: 999px; overflow: hidden; vertical-align: middle; }
 .medidor__relleno { display: block; height: 100%; border-radius: 999px; background: var(--accion); }

@@ -702,3 +702,8 @@ test("reportes de bodega: el gráfico por día pasa a semanas con más de 14 dí
   const semanas = columnasPorDia(dias(30));
   assert.deepEqual(semanas.map((c) => [c.rotulo, c.completas]), [["S38", 7], ["S39", 7], ["S40", 7], ["S41", 7], ["S42", 2]]);
 });
+
+test("reportes de bodega: textos de vencimientos", async () => {
+  const { textoVencimiento, mesCorto } = await import("../ui/js/reportes.js");
+  assert.deepEqual([textoVencimiento("2026-11-20"), textoVencimiento(null), mesCorto("2026-11"), mesCorto("2027-01")], ["20/11/2026", "—", "nov 26", "ene 27"]);
+});
