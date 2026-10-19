@@ -187,7 +187,7 @@ test("supervisor: textos de revisiones", () => {
 
 import { PATRONES, simbolos, anchos, barras, MARGEN } from "../ui/js/code128.js";
 import { ESTADOS, armarAsignaciones, armarConteo, armarGrupos, armarLotesDespacho, cantidadMovimiento, diasParaVencer, esCodigoCaja, estadoFila,
-  filtrosBodega, filtrosExistencias, finDeMes, nombreOpcion, textoLoteBodega, cajasDeLaGrande, cajasEscaneadas, lotesParaEscanear, venceDespues,
+  filtrosBodega, filtrosExistencias, finDeMes, nombreOpcion, textoLoteBodega, cajasDeLaGrande, cajasEscaneadas, lotesParaEscanear, recuperarTraspaso, venceDespues,
   opcionesDescuento, quien, resumenRecepcion, revisarDespacho, sugerirAsignacion, textoAsignacion, textoDocumento, textoEstado, textoMovimiento,
   textoPorVencer, textoVencimiento, unidadesPorProducto, nombreBodega, haceTiempo, estadoSap, avanceConteo, pasosPuestaEnMarcha, armarLotesPequena,
   agruparEtiquetas, armarConteoCajas, conteoGuardadoAlmacen, conteoGuardadoGrande, cuerpoEdicionGrande, textoContado, filasTraspaso, resumenTraspaso, pareceCodigoBarras } from "../ui/js/inventario.js";
@@ -576,6 +576,13 @@ test("traspaso escaneando: cada caja es una entera del lote y fecha que dice; el
   assert.equal(venceDespues(L2, L1), true);
   assert.equal(venceDespues(L1, L1), false);
   assert.equal(venceDespues({ lote: "X", vencimiento: null }, L1), true, "sin vencimiento cuenta como después");
+  // Lo escaneado guardado en el equipo se recupera si es el mismo traspaso y las cajas siguen en la 01.
+  const guardado = { unidades: 48, escaneadas: [L1, L2], loteElegido: L2 };
+  assert.deepEqual(recuperarTraspaso(guardado, { unidades: 48, cajas }), { escaneadas: [L1, L2], loteElegido: L2 });
+  assert.equal(recuperarTraspaso(guardado, { unidades: 24, cajas }), null, "otro traspaso: se empieza de nuevo");
+  assert.equal(recuperarTraspaso({ ...guardado, escaneadas: [L1, L1, L1] }, { unidades: 48, cajas }), null, "una caja que ya no está");
+  assert.equal(recuperarTraspaso({ ...guardado, escaneadas: [L2, L2] }, { unidades: 24, cajas }), null, "más de lo que pasó SAP");
+  assert.equal(recuperarTraspaso(null, { unidades: 48, cajas }), null);
 });
 
 test("reportes: signos, porcentaje, frases destacadas, nota y nombre del PDF", () => {

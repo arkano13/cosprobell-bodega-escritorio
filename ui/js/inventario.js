@@ -262,6 +262,15 @@ export function lotesParaEscanear(cajas, escaneadas) {
   const vence = (l) => (l.vencimiento ? Date.parse(l.vencimiento) : Infinity);
   return [...lotes.values()].sort((a, b) => vence(a) - vence(b));
 }
+// Cajas de un traspaso guardadas en el equipo (un corte de internet o cerrar la app no las pierde). Se recuperan si es el
+// mismo traspaso (las mismas unidades) y cada caja sigue estando en la 01; si no, se empieza de nuevo.
+export function recuperarTraspaso(guardado, { unidades, cajas }) {
+  if (!guardado || guardado.unidades !== unidades || !Array.isArray(guardado.escaneadas)) return null;
+  const elegidas = cajasEscaneadas(cajas, guardado.escaneadas);
+  if (elegidas.some((c) => !c) || elegidas.reduce((t, c) => t + c.unidades, 0) > unidades) return null;
+  return { escaneadas: guardado.escaneadas.map((e) => ({ lote: e.lote ?? null, vencimiento: e.vencimiento ?? null })),
+    loteElegido: guardado.loteElegido ?? null };
+}
 // ¿Esta caja vence después que la recomendada? (para avisar antes de pasarla)
 export function venceDespues(elegido, recomendado) {
   if (!recomendado) return false;

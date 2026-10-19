@@ -6,7 +6,7 @@ import { HORAS_EN_LISTA, datosLinea, pedidoConNombres, sigueEnLista, textosPrepa
 import { NOMBRES_DATOS, estadoDatos, estadoOperador, puedeSerUnidad, quienConfirmo, textoCambio, textoRevision, textoSinEntrega, textoUnidad } from "./supervisor.js";
 import { ESTADOS, TEXTO_SIN_COMPARACION, armarAsignaciones, agruparEtiquetas, armarConteo, armarConteoCajas, conteoGuardadoAlmacen, conteoGuardadoGrande, cuerpoEdicionGrande, armarGrupos, armarLotesDespacho, armarLotesPequena, avanceConteo,
   cantidadMovimiento, diasParaVencer, esCodigoCaja, pareceCodigoBarras, estadoFila, estadoSap, filtrosBodega, filtrosExistencias, finDeMes, nombreBodega, nombreOpcion, opcionesDescuento,
-  pasosPuestaEnMarcha, quien, filasTraspaso, resumenTraspaso, cajasDeLaGrande, cajasEscaneadas, lotesParaEscanear, venceDespues, resumenRecepcion, revisarDespacho, sugerirAsignacion, textoAsignacion, textoContado, textoDocumento, textoEstado, textoLoteBodega,
+  pasosPuestaEnMarcha, quien, filasTraspaso, resumenTraspaso, cajasDeLaGrande, cajasEscaneadas, lotesParaEscanear, recuperarTraspaso, venceDespues, resumenRecepcion, revisarDespacho, sugerirAsignacion, textoAsignacion, textoContado, textoDocumento, textoEstado, textoLoteBodega,
   textoMovimiento, textoPorVencer, textoVencimiento, unidadesPorProducto } from "./inventario.js";
 import { conSigno, destacadosCuadre, nombreArchivoCuadre, notaCuadre, porcentaje, unidadesConSigno } from "./reportes.js";
 import { REPORTES, crearReportesBodega } from "./reportes-bodega.js";
@@ -1628,7 +1628,9 @@ async function vistaInventario() {
   const p = r.pendientes;
   // Sin comparación con SAP no hay pendientes que calcular: el inventario de la bodega funciona igual.
   const comparar = r.comparacionDisponible === true;
-  estado.pendientesInventario = comparar ? p.porUbicar + p.porDescontar + (p.porPasar ?? 0) : 0;
+  // Los traspasos siguen con datos de SAP más viejos (el puente parado unas horas).
+  const traspasos = comparar || r.traspasosDisponibles === true;
+  estado.pendientesInventario = (comparar ? p.porUbicar + p.porDescontar : 0) + (traspasos ? p.porPasar ?? 0 : 0);
   const lector = campoLector({ placeholder: "Escaneá la etiqueta de una caja o el código de un producto", alLeer: (t) => leerEnInventario(t) });
   // Una tarea de hoy: n null muestra "—" (sin datos para calcularla).
   const tarea = (nombreIcono, titulo, n, texto, onclick, tipo = "alerta") => h("button", {
@@ -1662,8 +1664,8 @@ async function vistaInventario() {
         () => vistaConteo(), "gris"),
       tarea("caja", "Falta guardar", comparar ? p.porUbicar : null,
         conDatos(`llegó en SAP y falta guardarlo en la bodega${p.actualizando > 0 ? ` · ${numero(p.actualizando)} actualizándose` : ""}`), () => vistaPendientes("ubicar")),
-      tarea("mover", "Traspasos por aceptar", comparar && r.bodegas?.grande && r.bodegas?.pequena ? p.porPasar ?? 0 : null,
-        !comparar ? conDatos("") : r.bodegas?.grande && r.bodegas?.pequena
+      tarea("mover", "Traspasos por aceptar", traspasos && r.bodegas?.grande && r.bodegas?.pequena ? p.porPasar ?? 0 : null,
+        !traspasos ? conDatos("") : r.bodegas?.grande && r.bodegas?.pequena
           ? `SAP pasó de ${bodegaNombre("grande", { corto: true })} a ${bodegaNombre("pequena", { corto: true })}: aceptá de qué lotes` : "Falta elegir el almacén de cada bodega",
         () => vistaPendientes("pasar")),
       tarea("restar", "Falta marcar salida", comparar ? p.porDescontar : null, conDatos("salió en SAP y falta marcar de qué lote"), () => vistaPendientes("descontar")),
@@ -2256,7 +2258,9 @@ async function vistaTraspaso(itemCode, { desde = "pendientes" } = {}) {
   const encabezado = h("div", { class: "encabezado" }, h("div", {}, h("h1", {}, `Traspaso a ${a}`),
     h("p", { class: "encabezado__sub" }, p.itemName, " · ", h("span", { class: "codigo" }, p.itemCode))));
   const total = p.traspaso?.unidades ?? 0;
+  const claveGuardado = `traspaso.${itemCode}`;
   if (!total) {
+    guardado.borrar(claveGuardado);
     return mostrarInventario(volver, encabezado, aviso("ok", `No hay un traspaso de SAP por aceptar de este producto.`),
       boton("", "siguiente", "Ver el producto", { onclick: () => vistaProducto(itemCode) }));
   }
@@ -2265,7 +2269,8 @@ async function vistaTraspaso(itemCode, { desde = "pendientes" } = {}) {
   let eligiendo = !p.traspaso.sugerencia;
   let modo = "escanear";
   const cajas = cajasDeLaGrande(p.lotes);
-  let escaneadas = [];
+  const recuperado = recuperarTraspaso(guardado.leer(claveGuardado), { unidades: total, cajas });
+  let escaneadas = recuperado?.escaneadas ?? [];
   const arriba = h("div", {});
   const cuerpo = h("div", {});
   const problema = aviso("error", "", { role: "alert", hidden: true });
@@ -2278,6 +2283,7 @@ async function vistaTraspaso(itemCode, { desde = "pendientes" } = {}) {
     try {
       const { data } = await api.traspasar(operacion.para({ itemCode, unidades: total, ...eleccion }));
       operacion.terminar();
+      guardado.borrar(claveGuardado);
       const vacias = data.cajas.filter((c) => c.entera).map((c) => c.codigo);
       vistaProducto(itemCode, { tipo: "ok", texto: `Listo: ${unidadesTexto(data.unidades)} pasaron a ${a} (${data.lotes.map((l) => `${l.lote ?? "sin lote"}: ${numero(l.unidades)}`).join(" · ")}).`
         + (vacias.length ? ` ${vacias.length === 1 ? "Quedó vacía la caja" : "Quedaron vacías las cajas"} ${vacias.join(", ")}.` : "") });
@@ -2285,6 +2291,7 @@ async function vistaTraspaso(itemCode, { desde = "pendientes" } = {}) {
       control.disabled = false;
       if (error.status === 401) return mostrarError(error);
       if (error.codigo === "CANTIDAD_CAMBIO") {
+        guardado.borrar(claveGuardado);
         return poner(cuerpo, aviso("alerta", error.mensaje, { role: "alert" }),
           boton("boton--principal", "actualizar", "Ver de nuevo", { onclick: () => vistaTraspaso(itemCode, { desde }) }));
       }
@@ -2342,8 +2349,11 @@ async function vistaTraspaso(itemCode, { desde = "pendientes" } = {}) {
   // cada caja. Varias cajas tienen el mismo código: cada lectura suma una caja entera del lote elegido.
   const textoSugerencia = (lotes) => lotes.map((l) => `${l.cajas} ${l.cajas === 1 ? "caja" : "cajas"} del lote ${l.lote ?? "sin lote"} (vence ${textoVencimiento(l.vencimiento)})`).join(" y ");
   const mismoLote = (x, y) => Boolean(x && y) && (x.lote ?? null) === (y.lote ?? null) && (x.vencimiento ?? null) === (y.vencimiento ?? null);
-  let loteElegido = lotesParaEscanear(cajas, [])[0] ?? null;
+  let loteElegido = recuperado?.loteElegido ?? lotesParaEscanear(cajas, [])[0] ?? null;
   function pintarEscaneo() {
+    // Lo escaneado queda en el equipo hasta aceptar: si se corta internet o se cierra la app, se sigue desde acá.
+    if (escaneadas.length) guardado.escribir(claveGuardado, { unidades: total, escaneadas, loteElegido });
+    else guardado.borrar(claveGuardado);
     const elegidas = cajasEscaneadas(cajas, escaneadas);
     const suma = elegidas.reduce((t, c) => t + (c?.unidades ?? 0), 0);
     const listo = suma === total;
@@ -2361,6 +2371,8 @@ async function vistaTraspaso(itemCode, { desde = "pendientes" } = {}) {
       aviso("info", p.traspaso.sugerencia
         ? `SAP pasó ${unidadesTexto(total)} de ${de} a ${a}. Pasá ${textoSugerencia(p.traspaso.sugerencia)}: vencen primero.`
         : `SAP pasó ${unidadesTexto(total)} de ${de} a ${a}, pero en ${de} hay menos registrado: avisale al supervisor.`),
+      recuperado?.escaneadas.length && escaneadas === recuperado.escaneadas
+        && aviso("info", `${escaneadas.length === 1 ? "Se recuperó 1 caja escaneada" : `Se recuperaron ${escaneadas.length} cajas escaneadas`} antes: seguí desde acá.`),
       h("p", { class: "traspaso-avance" }, `${escaneadas.length} ${escaneadas.length === 1 ? "caja" : "cajas"} · ${numero(suma)} de ${unidadesTexto(total)}`),
       escaneadas.length > 0 && h("ul", { class: "traspaso-cajas" }, elegidas.map((c, i) => h("li", {}, icono("completa"),
         h("span", {}, h("strong", {}, `Caja ${i + 1}`), h("span", { class: "suave" }, `${loteTexto(c)} · ${unidadesTexto(c.unidades)}`))))),
@@ -2855,14 +2867,19 @@ async function vistaPendientes(pestana = "ubicar") {
   }
   const porPasar = d.porPasar ?? [];
   estado.pendientesInventario = d.porUbicar.length + d.porDescontar.length + porPasar.length;
+  // Puente parado unas horas: solo quedan los traspasos (se aceptan con los últimos datos de SAP).
+  const soloTraspasos = d.comparacionDisponible === false;
+  if (soloTraspasos && (pestana === "ubicar" || pestana === "descontar")) pestana = "pasar";
   const pestanas = [["ubicar", "Falta guardar", d.porUbicar.length], ["pasar", "Traspasos por aceptar", porPasar.length],
-    ["descontar", "Falta marcar salida", d.porDescontar.length], ["historial", "Salidas marcadas", 0]];
+    ["descontar", "Falta marcar salida", d.porDescontar.length], ["historial", "Salidas marcadas", 0]]
+    .filter(([id]) => !soloTraspasos || id === "pasar" || id === "historial");
   const nav = h("nav", { class: "pestanas", "aria-label": "Pendientes del inventario" }, pestanas.map(([id, texto, n]) =>
     h("button", { class: "pestana", type: "button", "aria-current": id === pestana ? "page" : null, onclick: () => vistaPendientes(id) },
       texto, n > 0 && h("span", { class: "contador contador--alerta", "aria-label": `${n} pendientes` }, numero(n)))));
   const contenido = h("div", {});
   const documentos = (v) => (v.documentos?.length ? h("span", {}, v.documentos.map((x) => `${textoDocumento(x)} (${fecha(x.docDate)})`).join(" · ")) : null);
   mostrarInventario(volverInventario(), h("div", { class: "encabezado" }, h("h1", {}, "Pendientes")), nav,
+    soloTraspasos && aviso("info", `Sin datos recientes de SAP${d.existenciasSapAl ? ` (los últimos son de ${fechaHora(d.existenciasSapAl)})` : ""}. Los traspasos se pueden aceptar igual; "Falta guardar" y "Falta marcar salida" vuelven cuando el puente mande datos nuevos.`),
     d.actualizando.length > 0 && pestana !== "historial" && h("p", { class: "suave nota" }, icono("info"),
       `${numero(d.actualizando.length)} ${d.actualizando.length === 1 ? "producto tuvo" : "productos tuvieron"} cambios recientes en SAP: aparecen acá cuando termine de llegar todo (unos 15 minutos).`),
     contenido);
