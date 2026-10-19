@@ -1710,16 +1710,18 @@ function puestaEnMarcha(r, supervisor) {
         : boton("", "siguiente", "Hacer", { onclick: ir(paso), "aria-label": `${paso.texto}: hacer` })))));
 }
 
-// Buscar un producto por código de barras, código de artículo o nombre. proposito "recibir" lleva a recibirlo.
+// Buscar un producto por código de barras, código de artículo o nombre. proposito "recibir" lleva a recibirlo y
+// "traspaso" a pasarlo a la pequeña con la hoja de traslado.
 function vistaBuscar({ texto = "", resultados = null, proposito = null } = {}) {
-  const recibir = proposito === "recibir";
+  const recibir = proposito === "recibir", traspaso = proposito === "traspaso";
   const lista = h("ul", { class: "filas" });
   const vacio = h("p", { class: "suave vacio", hidden: true });
-  const elegir = (p) => (recibir ? vistaRecibir(p.itemCode) : vistaProducto(p.itemCode));
+  const elegir = (p) => (recibir ? vistaRecibir(p.itemCode) : traspaso ? vistaTraspasoManual(p.itemCode) : vistaProducto(p.itemCode));
   function pintar(filas) {
     lista.replaceChildren(...filas.map((p) => filaAdmin({ nombre: p.itemName,
       detalle: [h("span", { class: "codigo" }, p.itemCode), ...p.codigos.slice(0, 3).map((c) => h("span", { class: "codigo codigo--barras" }, c))],
-      acciones: [boton("boton--principal", recibir ? "caja" : "siguiente", recibir ? "Recibir" : "Ver", { onclick: () => elegir(p) })] })));
+      acciones: [boton("boton--principal", recibir ? "caja" : traspaso ? "mover" : "siguiente", recibir ? "Recibir" : traspaso ? "Pasar" : "Ver",
+        { onclick: () => elegir(p) })] })));
     vacio.textContent = filas.length ? "" : `Ningún producto coincide con "${texto}".`;
     vacio.hidden = filas.length > 0;
   }
@@ -1740,8 +1742,9 @@ function vistaBuscar({ texto = "", resultados = null, proposito = null } = {}) {
   const lector = campoLector({ etiqueta: "Buscar producto", placeholder: "Escaneá un código o escribí el nombre o el código del artículo",
     ayuda: "Escribí y apretá Enter para buscar.", alLeer: buscar });
   mostrarInventario(volverInventario(),
-    h("div", { class: "encabezado" }, h("div", {}, h("h1", {}, recibir ? "Recibir mercadería" : "Consultar un producto"),
-      h("p", { class: "encabezado__sub" }, recibir ? "Elegí el producto que llegó." : "Elegí el producto para ver cuánto hay en cada bodega."))),
+    h("div", { class: "encabezado" }, h("div", {}, h("h1", {}, recibir ? "Recibir mercadería" : traspaso ? "Traspaso con hoja de traslado" : "Consultar un producto"),
+      h("p", { class: "encabezado__sub" }, recibir ? "Elegí el producto que llegó." : traspaso ? "Escaneá o buscá cada producto de la hoja de traslado."
+        : "Elegí el producto para ver cuánto hay en cada bodega."))),
     lector.seccion, lista, vacio);
   if (resultados) pintar(resultados);
   lector.entrada.focus();
@@ -1773,6 +1776,8 @@ async function vistaProducto(itemCode, mensaje = null) {
     e?.estado !== "por_ubicar" && boton("", "caja", "Recibir", { onclick: () => vistaRecibir(itemCode) }),
     p.porPasar > 0 && boton("boton--principal", "mover", `Aceptar traspaso a ${bodegaNombre("pequena", { corto: true })} (${numero(p.porPasar)})`,
       { onclick: () => vistaTraspaso(itemCode, { desde: "producto" }) }),
+    !(p.porPasar > 0) && enGrande > 0 && boton("", "mover", `Pasar a ${bodegaNombre("pequena", { corto: true })} con hoja de traslado`,
+      { onclick: () => vistaTraspasoManual(itemCode, { desde: "producto" }) }),
     supervisor && contadoEn.grande && boton("", "contar", `Editar conteo de ${bodegaNombre("grande", { corto: true })}`,
       { onclick: () => vistaConteo({ bodega: "grande", itemCode, editar: true }) }),
     supervisor && contadoEn.pequena && boton("", "contar", `Editar conteo de ${bodegaNombre("pequena", { corto: true })}`, { onclick: () => contarPequena(p) }),
@@ -2248,7 +2253,44 @@ function vistaReponer() {
 // y se escanea el código de barras de cada caja (el de la caja del proveedor, igual en todas). Solo cajas enteras. El supervisor puede
 // aceptar sin escanear: la sugerencia por lote o eligiendo otros lotes. Al aceptar se restan de las cajas de la grande y
 // se suman a la pequeña con su lote y vencimiento.
-async function vistaTraspaso(itemCode, { desde = "pendientes" } = {}) {
+// Traspaso con la hoja de traslado en la mano, sin esperar a SAP: el número de traslado y cuántas unidades pasaron;
+// después sigue igual que uno de SAP (escanear las cajas o, el supervisor, elegir los lotes).
+async function vistaTraspasoManual(itemCode, { desde = "pendientes" } = {}) {
+  // Uno a medio escanear se retoma (vistaTraspaso lo recupera).
+  if (guardado.leer(`traspaso.${itemCode}`)?.traslado) return vistaTraspaso(itemCode, { desde });
+  mostrarInventario(cargando("Cargando producto…"));
+  let p;
+  try { p = (await api.producto(itemCode)).data; } catch (error) { return mostrarError(error, () => vistaTraspasoManual(itemCode, { desde })); }
+  recordarBodegas(p.bodegas);
+  const de = bodegaNombre("grande", { corto: true }), a = bodegaNombre("pequena", { corto: true });
+  const enGrande = p.lotes.reduce((t, l) => t + l.unidades, 0);
+  const volver = desde === "producto" ? volverA(p.itemName, () => vistaProducto(itemCode)) : volverA("Traspasos por aceptar", () => vistaPendientes("pasar"));
+  const encabezado = h("div", { class: "encabezado" }, h("div", {}, h("h1", {}, `Pasar a ${a} con hoja de traslado`),
+    h("p", { class: "encabezado__sub" }, p.itemName, " · ", h("span", { class: "codigo" }, p.itemCode))));
+  if (!enGrande) return mostrarInventario(volver, encabezado, aviso("alerta", `No hay cajas de este producto en ${de}: primero hay que contar ${de}.`),
+    boton("", "siguiente", "Ver el producto", { onclick: () => vistaProducto(itemCode) }));
+  const numeroTraslado = h("input", { id: "traslado-numero", class: "campo codigo", maxlength: "20", autocomplete: "off", spellcheck: "false", inputmode: "numeric" });
+  const unidades = h("input", { id: "traslado-unidades", class: "campo campo--numero", type: "number", min: "1", max: String(enGrande), inputmode: "numeric" });
+  const problema = aviso("error", "", { role: "alert", hidden: true });
+  const seguir = boton("boton--principal boton--grande", "siguiente", "Seguir", { type: "submit" });
+  mostrarInventario(volver, encabezado,
+    aviso("info", `Para un traslado de ${de} a ${a} que todavía no aparece (sin datos de SAP o porque se cortó). Copiá el número y la cantidad de la hoja. Hay ${unidadesTexto(enGrande)} en ${de}.`),
+    h("form", { class: "tarjeta", oninput: () => { problema.hidden = true; }, onsubmit: (evento) => {
+      evento.preventDefault();
+      const traslado = numeroTraslado.value.trim(), n = Number(unidades.value);
+      const falla = !/^[A-Za-z0-9-]{1,20}$/.test(traslado) ? "Escribí el número de traslado de la hoja."
+        : !enteroPositivo(n) || n > enGrande ? `Escribí cuántas unidades pasaron: entre 1 y ${numero(enGrande)}.` : null;
+      if (falla) { textoAviso(problema, falla); problema.hidden = false; return; }
+      vistaTraspaso(itemCode, { desde, manual: { traslado, unidades: n } });
+    } },
+    campoCon("traslado-numero", "Número de traslado", numeroTraslado),
+    campoCon("traslado-unidades", `Unidades que pasaron a ${a}`, unidades),
+    problema, h("div", { class: "fila" }, seguir)));
+  numeroTraslado.focus();
+}
+
+// manual: { traslado, unidades } cuando se pasa con la hoja de traslado (ver vistaTraspasoManual).
+async function vistaTraspaso(itemCode, { desde = "pendientes", manual = null } = {}) {
   mostrarInventario(cargando("Cargando producto…"));
   let p;
   try { p = (await api.producto(itemCode)).data; } catch (error) { return mostrarError(error, () => vistaTraspaso(itemCode, { desde })); }
@@ -2257,19 +2299,26 @@ async function vistaTraspaso(itemCode, { desde = "pendientes" } = {}) {
   const volver = desde === "producto" ? volverA(p.itemName, () => vistaProducto(itemCode)) : volverA("Traspasos por aceptar", () => vistaPendientes("pasar"));
   const encabezado = h("div", { class: "encabezado" }, h("div", {}, h("h1", {}, `Traspaso a ${a}`),
     h("p", { class: "encabezado__sub" }, p.itemName, " · ", h("span", { class: "codigo" }, p.itemCode))));
-  const total = p.traspaso?.unidades ?? 0;
   const claveGuardado = `traspaso.${itemCode}`;
+  // Uno con hoja de traslado a medio escanear sigue siendo con hoja, aunque mientras tanto SAP lo traiga.
+  const previo = guardado.leer(claveGuardado);
+  if (!manual && previo?.traslado) manual = { traslado: previo.traslado, unidades: previo.unidades };
+  const traslado = manual?.traslado ?? null;
+  if (manual) p.traspaso = { unidades: manual.unidades, sugerencia: null };
+  const total = p.traspaso?.unidades ?? 0;
+  if (traslado) encabezado.querySelector(".encabezado__sub").append(` · Traslado ${traslado}`);
   if (!total) {
     guardado.borrar(claveGuardado);
     return mostrarInventario(volver, encabezado, aviso("ok", `No hay un traspaso de SAP por aceptar de este producto.`),
-      boton("", "siguiente", "Ver el producto", { onclick: () => vistaProducto(itemCode) }));
+      h("div", { class: "fila" }, boton("boton--principal", "mover", "Pasar con hoja de traslado", { onclick: () => vistaTraspasoManual(itemCode, { desde }) }),
+        boton("", "siguiente", "Ver el producto", { onclick: () => vistaProducto(itemCode) })));
   }
   const filas = filasTraspaso(p.lotes, p.traspaso.sugerencia);
   const operacion = crearOperacion();
   let eligiendo = !p.traspaso.sugerencia;
   let modo = "escanear";
   const cajas = cajasDeLaGrande(p.lotes);
-  const recuperado = recuperarTraspaso(guardado.leer(claveGuardado), { unidades: total, cajas });
+  const recuperado = (previo?.traslado ?? null) === traslado ? recuperarTraspaso(previo, { unidades: total, cajas }) : null;
   let escaneadas = recuperado?.escaneadas ?? [];
   const arriba = h("div", {});
   const cuerpo = h("div", {});
@@ -2281,7 +2330,7 @@ async function vistaTraspaso(itemCode, { desde = "pendientes" } = {}) {
   async function aceptar(eleccion, control) {
     control.disabled = true; problema.hidden = true;
     try {
-      const { data } = await api.traspasar(operacion.para({ itemCode, unidades: total, ...eleccion }));
+      const { data } = await api.traspasar(operacion.para({ itemCode, unidades: total, ...(traslado ? { traslado } : {}), ...eleccion }));
       operacion.terminar();
       guardado.borrar(claveGuardado);
       const vacias = data.cajas.filter((c) => c.entera).map((c) => c.codigo);
@@ -2331,7 +2380,7 @@ async function vistaTraspaso(itemCode, { desde = "pendientes" } = {}) {
     } },
     h("h2", {}, "¿De qué lotes salió?"),
     h("p", { class: "suave" }, `Escribí cuántas unidades de cada lote pasaron a ${a}. Tienen que sumar ${unidadesTexto(total)}.`),
-    !p.traspaso.sugerencia && aviso("alerta", `En ${de} hay menos de lo que pasó SAP: revisá el conteo de ${de}.`),
+    !p.traspaso.sugerencia && !traslado && aviso("alerta", `En ${de} hay menos de lo que pasó SAP: revisá el conteo de ${de}.`),
     filas.length ? h("ul", { class: "traspaso-lotes traspaso-lotes--elegir" }, filas.map((f, i) => h("li", {},
       h("label", { class: "traspaso-lotes__datos", for: `traspaso-lote-${i}` }, h("strong", {}, loteTexto(f)),
         h("span", { class: "suave" }, `Hay ${unidadesTexto(f.disponibles)} en ${de}`)),
@@ -2352,7 +2401,7 @@ async function vistaTraspaso(itemCode, { desde = "pendientes" } = {}) {
   let loteElegido = recuperado?.loteElegido ?? lotesParaEscanear(cajas, [])[0] ?? null;
   function pintarEscaneo() {
     // Lo escaneado queda en el equipo hasta aceptar: si se corta internet o se cierra la app, se sigue desde acá.
-    if (escaneadas.length) guardado.escribir(claveGuardado, { unidades: total, escaneadas, loteElegido });
+    if (escaneadas.length) guardado.escribir(claveGuardado, { unidades: total, escaneadas, loteElegido, ...(traslado ? { traslado } : {}) });
     else guardado.borrar(claveGuardado);
     const elegidas = cajasEscaneadas(cajas, escaneadas);
     const suma = elegidas.reduce((t, c) => t + (c?.unidades ?? 0), 0);
@@ -2368,16 +2417,16 @@ async function vistaTraspaso(itemCode, { desde = "pendientes" } = {}) {
       h("span", {}, loteTexto(l)),
       h("span", { class: "lote-caja__nota" }, `${i === 0 ? "Recomendado · " : venceDespues(l, lotes[0]) ? "Vence después · " : ""}${l.cajas} ${l.cajas === 1 ? "caja" : "cajas"} de ${numero(l.unidades)}`));
     poner(cuerpo,
-      aviso("info", p.traspaso.sugerencia
-        ? `SAP pasó ${unidadesTexto(total)} de ${de} a ${a}. Pasá ${textoSugerencia(p.traspaso.sugerencia)}: vencen primero.`
-        : `SAP pasó ${unidadesTexto(total)} de ${de} a ${a}, pero en ${de} hay menos registrado: avisale al supervisor.`),
+      aviso("info", traslado ? `Traslado ${traslado}: pasan ${unidadesTexto(total)} de ${de} a ${a}. Escaneá cada caja que pasa.`
+        : p.traspaso.sugerencia ? `SAP pasó ${unidadesTexto(total)} de ${de} a ${a}. Pasá ${textoSugerencia(p.traspaso.sugerencia)}: vencen primero.`
+          : `SAP pasó ${unidadesTexto(total)} de ${de} a ${a}, pero en ${de} hay menos registrado: avisale al supervisor.`),
       recuperado?.escaneadas.length && escaneadas === recuperado.escaneadas
         && aviso("info", `${escaneadas.length === 1 ? "Se recuperó 1 caja escaneada" : `Se recuperaron ${escaneadas.length} cajas escaneadas`} antes: seguí desde acá.`),
       h("p", { class: "traspaso-avance" }, `${escaneadas.length} ${escaneadas.length === 1 ? "caja" : "cajas"} · ${numero(suma)} de ${unidadesTexto(total)}`),
       escaneadas.length > 0 && h("ul", { class: "traspaso-cajas" }, elegidas.map((c, i) => h("li", {}, icono("completa"),
         h("span", {}, h("strong", {}, `Caja ${i + 1}`), h("span", { class: "suave" }, `${loteTexto(c)} · ${unidadesTexto(c.unidades)}`))))),
       problema,
-      listo ? aviso("ok", `Listo: ${numero(suma)} unidades, lo que pasó SAP.`) : [
+      listo ? aviso("ok", `Listo: ${numero(suma)} unidades, ${traslado ? `las del traslado ${traslado}` : "lo que pasó SAP"}.`) : [
         h("section", { class: "tarjeta traspaso-paso", "aria-labelledby": "traspaso-paso-1" },
           h("h2", { id: "traspaso-paso-1" }, "1. ¿Qué lote y vencimiento dicen las cajas?"),
           lotes.length ? h("div", { class: "lotes-caja" }, lotes.map(opcionLote),
@@ -2427,7 +2476,7 @@ async function vistaTraspaso(itemCode, { desde = "pendientes" } = {}) {
       const unidades = elegidasNuevas.reduce((t, c) => t + (c?.unidades ?? 0), 0);
       if (unidades > total) {
         pintar();
-        return mostrarProblema(`Con esta caja serían ${numero(unidades)} unidades y SAP pasó ${numero(total)}. Solo se pasan cajas enteras: avisale al supervisor.`);
+        return mostrarProblema(`Con esta caja serían ${numero(unidades)} unidades y ${traslado ? `el traslado dice ${numero(total)}` : `SAP pasó ${numero(total)}`}. Solo se pasan cajas enteras: avisale al supervisor.`);
       }
       escaneadas = nuevas;
       pintar();
@@ -2436,7 +2485,8 @@ async function vistaTraspaso(itemCode, { desde = "pendientes" } = {}) {
 
   const pintar = () => {
     poner(arriba, modo === "escanear" ? null
-      : aviso("info", `SAP pasó ${unidadesTexto(total)} de ${de} a ${a}. Sin escanear (supervisor): revisá la sugerencia y aceptá.`));
+      : aviso("info", traslado ? `Traslado ${traslado}: pasan ${unidadesTexto(total)} de ${de} a ${a}. Sin escanear (supervisor): elegí de qué lotes y aceptá.`
+        : `SAP pasó ${unidadesTexto(total)} de ${de} a ${a}. Sin escanear (supervisor): revisá la sugerencia y aceptá.`));
     return modo === "escanear" ? pintarEscaneo() : eligiendo ? pintarEleccion() : pintarSugerencia();
   };
   mostrarInventario(volver, encabezado, arriba, cuerpo);
@@ -2903,7 +2953,8 @@ async function vistaPendientes(pestana = "ubicar") {
         dato: dato(`Pasó a ${a}`, unidadesTexto(v.unidades)),
         acciones: [boton("boton--principal", "mover", "Revisar y aceptar", { onclick: () => vistaTraspaso(v.itemCode) }),
           boton("", "siguiente", "Ver", { onclick: () => vistaProducto(v.itemCode) })] })))
-        : aviso("ok", "No hay traspasos por aceptar."));
+        : aviso("ok", "No hay traspasos por aceptar."),
+      h("div", { class: "fila" }, boton("", "mover", "Pasar con hoja de traslado (sin esperar a SAP)", { onclick: () => vistaBuscar({ proposito: "traspaso" }) })));
   } else if (pestana === "descontar") {
     contenido.replaceChildren(d.porDescontar.length
       ? h("ul", { class: "filas" }, d.porDescontar.map((v) => filaAdmin({ clase: "fila-admin--alerta", nombre: v.itemName,
@@ -2923,6 +2974,7 @@ async function pendientesSinComparacion(error) {
   mostrarInventario(volverInventario(), h("div", { class: "encabezado" }, h("h1", {}, "Salidas marcadas")),
     aviso("info", `${error.mensaje} "Falta guardar" y "Falta marcar salida" vuelven cuando haya datos recientes de SAP.`, {},
       error.codigo === "ALMACENES_SIN_ELEGIR" && esSupervisor() && boton("", "bodega", "Elegir almacenes", { onclick: () => vistaSupervisor("almacenes") })),
+    h("div", { class: "fila" }, boton("", "mover", "Pasar con hoja de traslado (sin esperar a SAP)", { onclick: () => vistaBuscar({ proposito: "traspaso" }) })),
     contenido);
   await listaDescuentos(contenido);
 }
