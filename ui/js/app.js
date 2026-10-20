@@ -1776,7 +1776,7 @@ async function vistaProducto(itemCode, mensaje = null) {
     e?.estado !== "por_ubicar" && boton("", "caja", "Recibir", { onclick: () => vistaRecibir(itemCode) }),
     p.porPasar > 0 && boton("boton--principal", "mover", `Aceptar traspaso a ${bodegaNombre("pequena", { corto: true })} (${numero(p.porPasar)})`,
       { onclick: () => vistaTraspaso(itemCode, { desde: "producto" }) }),
-    !(p.porPasar > 0) && enGrande > 0 && boton("", "mover", `Pasar a ${bodegaNombre("pequena", { corto: true })} con hoja de traslado`,
+    supervisor && !(p.porPasar > 0) && enGrande > 0 && boton("", "mover", `Pasar a ${bodegaNombre("pequena", { corto: true })} con hoja de traslado`,
       { onclick: () => vistaTraspasoManual(itemCode, { desde: "producto" }) }),
     supervisor && contadoEn.grande && boton("", "contar", `Editar conteo de ${bodegaNombre("grande", { corto: true })}`,
       { onclick: () => vistaConteo({ bodega: "grande", itemCode, editar: true }) }),
@@ -2253,9 +2253,10 @@ function vistaReponer() {
 // y se escanea el código de barras de cada caja (el de la caja del proveedor, igual en todas). Solo cajas enteras. El supervisor puede
 // aceptar sin escanear: la sugerencia por lote o eligiendo otros lotes. Al aceptar se restan de las cajas de la grande y
 // se suman a la pequeña con su lote y vencimiento.
-// Traspaso con la hoja de traslado en la mano, sin esperar a SAP: el número de traslado y cuántas unidades pasaron;
-// después sigue igual que uno de SAP (escanear las cajas o, el supervisor, elegir los lotes).
+// Traspaso con la hoja de traslado en la mano, sin esperar a SAP (solo el supervisor): el número de traslado y cuántas
+// unidades pasaron; después sigue igual que uno de SAP (escanear las cajas o elegir los lotes).
 async function vistaTraspasoManual(itemCode, { desde = "pendientes" } = {}) {
+  if (!esSupervisor()) return vistaProducto(itemCode);
   // Uno a medio escanear se retoma (vistaTraspaso lo recupera).
   if (guardado.leer(`traspaso.${itemCode}`)?.traslado) return vistaTraspaso(itemCode, { desde });
   mostrarInventario(cargando("Cargando producto…"));
@@ -2302,7 +2303,7 @@ async function vistaTraspaso(itemCode, { desde = "pendientes", manual = null } =
   const claveGuardado = `traspaso.${itemCode}`;
   // Uno con hoja de traslado a medio escanear sigue siendo con hoja, aunque mientras tanto SAP lo traiga.
   const previo = guardado.leer(claveGuardado);
-  if (!manual && previo?.traslado) manual = { traslado: previo.traslado, unidades: previo.unidades };
+  if (!manual && previo?.traslado && esSupervisor()) manual = { traslado: previo.traslado, unidades: previo.unidades };
   const traslado = manual?.traslado ?? null;
   if (manual) p.traspaso = { unidades: manual.unidades, sugerencia: null };
   const total = p.traspaso?.unidades ?? 0;
@@ -2310,7 +2311,7 @@ async function vistaTraspaso(itemCode, { desde = "pendientes", manual = null } =
   if (!total) {
     guardado.borrar(claveGuardado);
     return mostrarInventario(volver, encabezado, aviso("ok", `No hay un traspaso de SAP por aceptar de este producto.`),
-      h("div", { class: "fila" }, boton("boton--principal", "mover", "Pasar con hoja de traslado", { onclick: () => vistaTraspasoManual(itemCode, { desde }) }),
+      h("div", { class: "fila" }, esSupervisor() && boton("boton--principal", "mover", "Pasar con hoja de traslado", { onclick: () => vistaTraspasoManual(itemCode, { desde }) }),
         boton("", "siguiente", "Ver el producto", { onclick: () => vistaProducto(itemCode) })));
   }
   const filas = filasTraspaso(p.lotes, p.traspaso.sugerencia);
@@ -2954,7 +2955,7 @@ async function vistaPendientes(pestana = "ubicar") {
         acciones: [boton("boton--principal", "mover", "Revisar y aceptar", { onclick: () => vistaTraspaso(v.itemCode) }),
           boton("", "siguiente", "Ver", { onclick: () => vistaProducto(v.itemCode) })] })))
         : aviso("ok", "No hay traspasos por aceptar."),
-      h("div", { class: "fila" }, boton("", "mover", "Pasar con hoja de traslado (sin esperar a SAP)", { onclick: () => vistaBuscar({ proposito: "traspaso" }) })));
+      esSupervisor() && h("div", { class: "fila" }, boton("", "mover", "Pasar con hoja de traslado (sin esperar a SAP)", { onclick: () => vistaBuscar({ proposito: "traspaso" }) })));
   } else if (pestana === "descontar") {
     contenido.replaceChildren(d.porDescontar.length
       ? h("ul", { class: "filas" }, d.porDescontar.map((v) => filaAdmin({ clase: "fila-admin--alerta", nombre: v.itemName,
@@ -2974,7 +2975,7 @@ async function pendientesSinComparacion(error) {
   mostrarInventario(volverInventario(), h("div", { class: "encabezado" }, h("h1", {}, "Salidas marcadas")),
     aviso("info", `${error.mensaje} "Falta guardar" y "Falta marcar salida" vuelven cuando haya datos recientes de SAP.`, {},
       error.codigo === "ALMACENES_SIN_ELEGIR" && esSupervisor() && boton("", "bodega", "Elegir almacenes", { onclick: () => vistaSupervisor("almacenes") })),
-    h("div", { class: "fila" }, boton("", "mover", "Pasar con hoja de traslado (sin esperar a SAP)", { onclick: () => vistaBuscar({ proposito: "traspaso" }) })),
+    esSupervisor() && h("div", { class: "fila" }, boton("", "mover", "Pasar con hoja de traslado (sin esperar a SAP)", { onclick: () => vistaBuscar({ proposito: "traspaso" }) })),
     contenido);
   await listaDescuentos(contenido);
 }
