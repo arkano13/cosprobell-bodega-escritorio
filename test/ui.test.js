@@ -187,7 +187,7 @@ test("supervisor: textos de revisiones", () => {
 
 import { PATRONES, simbolos, anchos, barras, MARGEN } from "../ui/js/code128.js";
 import { ESTADOS, armarAsignaciones, armarConteo, armarGrupos, armarLotesDespacho, cantidadMovimiento, diasParaVencer, esCodigoCaja, estadoFila,
-  filtrosBodega, filtrosExistencias, finDeMes, nombreOpcion, textoLoteBodega, cajasDeLaGrande, cajasEscaneadas, lotesParaEscanear, recuperarTraspaso, venceDespues,
+  filtrosBodega, filtrosExistencias, finDeMes, nombreOpcion, textoLoteBodega, cajasDeLaGrande, cajasEscaneadas, lotesParaEscanear, recuperarTraspaso, venceDespues, asignarEscaneadas, asignadoPorLote,
   opcionesDescuento, quien, resumenRecepcion, revisarDespacho, sugerirAsignacion, textoAsignacion, textoDocumento, textoEstado, textoMovimiento,
   textoPorVencer, textoVencimiento, unidadesPorProducto, nombreBodega, haceTiempo, estadoSap, avanceConteo, pasosPuestaEnMarcha, armarLotesPequena,
   agruparEtiquetas, armarConteoCajas, conteoGuardadoAlmacen, conteoGuardadoGrande, cuerpoEdicionGrande, textoContado, filasTraspaso, resumenTraspaso, pareceCodigoBarras } from "../ui/js/inventario.js";
@@ -713,4 +713,15 @@ test("reportes de bodega: el gráfico por día pasa a semanas con más de 14 dí
 test("reportes de bodega: textos de vencimientos", async () => {
   const { textoVencimiento, mesCorto } = await import("../ui/js/reportes.js");
   assert.deepEqual([textoVencimiento("2026-11-20"), textoVencimiento(null), mesCorto("2026-11"), mesCorto("2027-01")], ["20/11/2026", "—", "nov 26", "ene 27"]);
+});
+
+test("lote al escanear: las unidades van al lote elegido hasta lo que tiene; si se llena, se pregunta por el resto", () => {
+  const lotes = [{ id: 15, unidades: 4 }, { id: 2, unidades: 10 }];
+  assert.deepEqual(asignarEscaneadas(null, 1, lotes), { asignado: [], pendiente: 1, lleno: false }, "sin lote elegido queda pendiente");
+  assert.deepEqual(asignarEscaneadas({ actual: 15, asignado: [] }, 3, lotes), { asignado: [{ id: 15, n: 3 }], pendiente: 0, lleno: false });
+  assert.deepEqual(asignarEscaneadas({ actual: 15, asignado: [{ id: 15, n: 3 }] }, 6, lotes), { asignado: [{ id: 15, n: 4 }], pendiente: 2, lleno: true }, "el lote 15 tiene 4");
+  const cambio = asignarEscaneadas({ actual: 2, asignado: [{ id: 15, n: 4 }] }, 6, lotes);
+  assert.deepEqual(cambio, { asignado: [{ id: 15, n: 4 }, { id: 2, n: 2 }], pendiente: 0, lleno: false }, "cambió de lote: queda en el orden elegido");
+  assert.deepEqual(asignarEscaneadas({ actual: 2, asignado: cambio.asignado }, 5, lotes).asignado, [{ id: 15, n: 4 }, { id: 2, n: 1 }], "si baja, se quita de lo último");
+  assert.deepEqual(asignadoPorLote(cambio.asignado), { 15: 4, 2: 2 });
 });

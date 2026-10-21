@@ -474,6 +474,35 @@ export function unidadesPorProducto(lineas) {
   return porProducto;
 }
 
+// Lote al escanear: las unidades escaneadas de un producto que todavía no tienen lote van al lote elegido (actual), hasta
+// lo que ese lote tiene en la pequeña. est: { actual, asignado: [{ id, n }] } en el orden en que se eligieron; total:
+// escaneadas del producto; lotes: los de la pequeña ({ id, unidades }). Devuelve el nuevo asignado, cuántas quedan sin
+// lote y si el lote elegido se llenó (hay que preguntar de qué lote es el resto). Si el total bajó, se quita de lo último.
+export function asignarEscaneadas(est, total, lotes) {
+  const asignado = (est?.asignado ?? []).filter((a) => a.n > 0).map((a) => ({ ...a }));
+  let sobra = asignado.reduce((t, a) => t + a.n, 0) - total;
+  for (const a of [...asignado].reverse()) {
+    if (sobra <= 0) break;
+    const quitar = Math.min(sobra, a.n);
+    a.n -= quitar; sobra -= quitar;
+  }
+  const quedan = asignado.filter((a) => a.n > 0);
+  let pendiente = total - quedan.reduce((t, a) => t + a.n, 0);
+  const actual = est?.actual ?? null;
+  if (pendiente > 0 && actual !== null) {
+    const fila = quedan.find((a) => a.id === actual);
+    const libre = (lotes.find((l) => l.id === actual)?.unidades ?? 0) - (fila?.n ?? 0);
+    const n = Math.min(pendiente, Math.max(0, libre));
+    if (n > 0) {
+      if (fila) fila.n += n; else quedan.push({ id: actual, n });
+      pendiente -= n;
+    }
+  }
+  return { asignado: quedan, pendiente, lleno: pendiente > 0 && actual !== null };
+}
+// Lo asignado al escanear como lo espera armarLotesDespacho: { [pequenaLoteId]: unidades }.
+export const asignadoPorLote = (asignado) => Object.fromEntries((asignado ?? []).map((a) => [a.id, a.n]));
+
 // Revisa cada producto contra la bodega pequeña. fichas: Map itemCode → { itemName, lotesPequena }.
 // Devuelve los faltantes (no se puede finalizar) y los productos que necesitan elegir lote (más de un lote).
 export function revisarDespacho(porProducto, fichas) {
