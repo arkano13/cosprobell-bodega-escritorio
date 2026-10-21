@@ -1209,3 +1209,10 @@ h2 {
 .traspaso-paso { margin-bottom: 16px; }
 .traspaso-paso h2 { margin: 0 0 12px; font-size: 22px; }
 .traspaso-paso .lotes-caja { margin-top: 0; }
+
+/* Lote al escanear: la pregunta de qué lote es un producto y, en la línea, cuántas unidades van de cada lote. */
+.pregunta-lote { margin-top: 14px; padding: 16px; border: 2px solid var(--accion); border-radius: var(--radio-chico); background: var(--superficie); color: var(--tinta); }
+.pregunta-lote h2 { margin: 0 0 6px; font-size: 20px; }
+.pregunta-lote p { margin: 0 0 10px; }
+.pregunta-lote .lotes-caja { margin-top: 0; }
+.linea__lotes { grid-column: 1 / -1; display: flex; flex-wrap: wrap; align-items: center; gap: 8px 12px; font-size: 14px; font-weight: 600; color: var(--accion); }

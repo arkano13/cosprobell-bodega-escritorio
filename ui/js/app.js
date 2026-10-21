@@ -6,7 +6,7 @@ import { HORAS_EN_LISTA, datosLinea, pedidoConNombres, sigueEnLista, textosPrepa
 import { NOMBRES_DATOS, estadoDatos, estadoOperador, puedeSerUnidad, quienConfirmo, textoCambio, textoRevision, textoSinEntrega, textoUnidad } from "./supervisor.js";
 import { ESTADOS, TEXTO_SIN_COMPARACION, armarAsignaciones, agruparEtiquetas, armarConteo, armarConteoCajas, conteoGuardadoAlmacen, conteoGuardadoGrande, cuerpoEdicionGrande, armarGrupos, armarLotesDespacho, armarLotesPequena, avanceConteo,
   cantidadMovimiento, diasParaVencer, esCodigoCaja, pareceCodigoBarras, estadoFila, estadoSap, filtrosBodega, filtrosExistencias, finDeMes, nombreBodega, nombreOpcion, opcionesDescuento,
-  pasosPuestaEnMarcha, quien, filasTraspaso, resumenTraspaso, cajasDeLaGrande, cajasEscaneadas, lotesParaEscanear, recuperarTraspaso, venceDespues, resumenRecepcion, revisarDespacho, sugerirAsignacion, textoAsignacion, textoContado, textoDocumento, textoEstado, textoLoteBodega,
+  pasosPuestaEnMarcha, quien, filasTraspaso, resumenTraspaso, cajasDeLaGrande, cajasEscaneadas, lotesParaEscanear, recuperarTraspaso, venceDespues, asignarEscaneadas, asignadoPorLote, resumenRecepcion, revisarDespacho, sugerirAsignacion, textoAsignacion, textoContado, textoDocumento, textoEstado, textoLoteBodega,
   textoMovimiento, textoPorVencer, textoVencimiento, unidadesPorProducto } from "./inventario.js";
 import { conSigno, destacadosCuadre, nombreArchivoCuadre, notaCuadre, porcentaje, unidadesConSigno } from "./reportes.js";
 import { REPORTES, crearReportesBodega } from "./reportes-bodega.js";
@@ -637,6 +637,7 @@ async function vistaEscaneo() {
   if (sesion.estado === "anulada") {
     guardarSesion(null);
     guardado.borrar(`cola.${pickingId}`);
+    guardado.borrar(`lotes.${pickingId}`);
     lecturas = null;
     return mostrar(h("div", { class: "tarjeta" },
       aviso("alerta", `El supervisor reinició la preparación del ${rotuloDocumento(pedido.fuenteDocumento).toLowerCase()} ${pedido.docNum} porque SAP cambió el documento. Empezala de nuevo desde la lista.`),
@@ -646,6 +647,76 @@ async function vistaEscaneo() {
   fuenteDocumentos = pedido.fuenteDocumento ?? fuenteDocumentos;
   const lineasPedido = new Map(pedido.lineas.map((l) => [l.lineNum, l]));
   let lineaReciente = null;
+
+  // Lote al escanear: si un producto tiene más de un lote en la pequeña, la primera unidad pregunta de qué lote es y las
+  // siguientes se cuentan en ese lote hasta cambiarlo (o hasta que se termine). Queda en el equipo hasta finalizar, y al
+  // finalizar ya no hay que volver a sacar el producto para ver el lote.
+  const claveLotes = `lotes.${pickingId}`;
+  const lotesElegidos = guardado.leer(claveLotes) ?? {};
+  const lotesDe = new Map();
+  let preguntando = [];
+  const preguntaLote = h("section", { class: "pregunta-lote", hidden: true, "aria-live": "polite" });
+  const escaneadasDe = (itemCode) => sesion.lineas.filter((l) => l.itemCode === itemCode).reduce((t, l) => t + l.cantidadEscaneada, 0);
+  const nombreProducto = (itemCode) => { const l = sesion.lineas.find((x) => x.itemCode === itemCode); return l ? nombreDe(l) : itemCode; };
+  const venceEn = (l) => (l.vencimiento ? Date.parse(l.vencimiento) : Infinity);
+  async function cargarLotes(itemCode) {
+    if (lotesDe.has(itemCode)) return lotesDe.get(itemCode);
+    lotesDe.set(itemCode, null);
+    try {
+      const lotes = ((await api.producto(itemCode)).data.lotesPequena ?? []).filter((l) => l.unidades > 0).sort((a, b) => venceEn(a) - venceEn(b));
+      lotesDe.set(itemCode, lotes);
+      return lotes;
+    } catch { lotesDe.delete(itemCode); return null; } // Sin conexión: se elige al finalizar.
+  }
+  async function repartirLote(itemCode) {
+    const lotes = await cargarLotes(itemCode);
+    if (!lotes || lotes.length < 2) return;
+    const anterior = lotesElegidos[itemCode];
+    const r = asignarEscaneadas(anterior, escaneadasDe(itemCode), lotes);
+    lotesElegidos[itemCode] = { actual: r.lleno ? null : anterior?.actual ?? null, asignado: r.asignado };
+    guardado.escribir(claveLotes, lotesElegidos);
+    if (r.pendiente > 0 && !preguntando.includes(itemCode)) preguntando.push(itemCode);
+    pintarPregunta(); pintar();
+  }
+  function elegirLote(itemCode, loteId) {
+    lotesElegidos[itemCode] = { asignado: [], ...lotesElegidos[itemCode], actual: loteId };
+    preguntando = preguntando.filter((x) => x !== itemCode);
+    pintarPregunta();
+    repartirLote(itemCode);
+    enfocar();
+  }
+  function cambiarLote(itemCode) {
+    preguntando = [itemCode, ...preguntando.filter((x) => x !== itemCode)];
+    pintarPregunta();
+  }
+  function pintarPregunta() {
+    const itemCode = preguntando[0];
+    const lotes = itemCode ? lotesDe.get(itemCode) : null;
+    preguntaLote.hidden = !lotes;
+    if (!lotes) return preguntaLote.replaceChildren();
+    const est = lotesElegidos[itemCode] ?? { asignado: [] };
+    const usadas = asignadoPorLote(est.asignado);
+    const pendiente = escaneadasDe(itemCode) - est.asignado.reduce((t, a) => t + a.n, 0);
+    const libres = lotes.map((l) => ({ ...l, libre: l.unidades - (usadas[l.id] ?? 0) })).filter((l) => l.libre > 0);
+    const terminado = est.actual === null && est.asignado.length > 0 && pendiente > 0;
+    preguntaLote.replaceChildren(
+      h("h2", {}, `¿De qué lote es ${nombreProducto(itemCode)}?`),
+      h("p", {}, terminado ? `El lote anterior se terminó: elegí de qué lote son ${cantidad(pendiente)} ${pendiente === 1 ? "unidad" : "unidades"}.`
+        : "Mirá el lote en el producto. Las próximas unidades se cuentan en ese lote hasta que lo cambies."),
+      h("div", { class: "lotes-caja" }, libres.map((l, i) => h("button", { class: `boton lote-caja${l.id === est.actual ? " boton--principal" : ""}`,
+        type: "button", onclick: () => elegirLote(itemCode, l.id) },
+      h("span", {}, `Lote ${l.lote ?? "sin lote"} · vence ${textoVencimiento(l.vencimiento)}`),
+      h("span", { class: "lote-caja__nota" }, `${i === 0 ? "Vence primero · " : ""}hay ${cantidad(l.libre)}`)))),
+      preguntando.length > 1 ? h("p", { class: "suave" }, `Después: ${preguntando.slice(1).map(nombreProducto).join(", ")}.`) : "");
+  }
+  // En la línea: cuántas unidades van de cada lote y el botón para cambiarlo.
+  function lotesDeLinea(itemCode) {
+    const lotes = lotesDe.get(itemCode), est = lotesElegidos[itemCode];
+    if (!lotes || lotes.length < 2 || !est) return null;
+    const partes = est.asignado.map((a) => `Lote ${lotes.find((l) => l.id === a.id)?.lote ?? "sin lote"}: ${cantidad(a.n)}`);
+    return h("div", { class: "linea__lotes" }, h("span", {}, partes.join(" · ") || "Falta elegir el lote"),
+      boton("boton--chico", "actualizar", "Cambiar lote", { onclick: () => cambiarLote(itemCode) }));
+  }
 
   const resultado = h("div", { class: "resultado", role: "status", "aria-live": "assertive" });
   const envio = h("div", { class: "envio" });
@@ -677,8 +748,14 @@ async function vistaEscaneo() {
       h("span", { class: "suave" }, pendientesTexto(lineas.filter((l) => l.cantidadEscaneada < l.cantidadPedida).length)));
     // Primero las pendientes; las completas quedan al final.
     const orden = [...lineas].sort((a, b) => (a.cantidadEscaneada >= a.cantidadPedida) - (b.cantidadEscaneada >= b.cantidadPedida));
-    lista.replaceChildren(...orden.map((l) => tarjetaLinea(l.pedidoLineNum, datosLinea(l, lineasPedido, pedido.nombres),
-      { pedida: l.cantidadPedida, escaneada: l.cantidadEscaneada, reciente: l.id === lineaReciente })));
+    const conLotes = new Set();
+    lista.replaceChildren(...orden.map((l) => {
+      const li = tarjetaLinea(l.pedidoLineNum, datosLinea(l, lineasPedido, pedido.nombres),
+        { pedida: l.cantidadPedida, escaneada: l.cantidadEscaneada, reciente: l.id === lineaReciente });
+      const lotes = !conLotes.has(l.itemCode) && lotesDeLinea(l.itemCode);
+      if (lotes) { conLotes.add(l.itemCode); li.append(lotes); }
+      return li;
+    }));
     const activa = sesion.estado === "en_proceso";
     entrada.disabled = !activa;
     bloqueo.hidden = activa;
@@ -727,6 +804,7 @@ async function vistaEscaneo() {
         mostrarResultado("ok", nombreDe(linea),
           `${cantidad(linea.cantidadEscaneada)} de ${cantidad(linea.cantidadPedida)}${linea.cantidadEscaneada >= linea.cantidadPedida ? " · línea completa" : ""}`);
         sonar("ok");
+        repartirLote(sesion.lineas.find((l) => l.id === linea.id)?.itemCode ?? linea.itemCode);
       }
       if (tipo === "rechazada") {
         mostrarResultado("error", evento.error.mensaje, `Código ${lectura.codigo}`);
@@ -764,6 +842,10 @@ async function vistaEscaneo() {
       mostrarResultado("error", "Hay lecturas sin enviar", "Esperá a que se envíen antes de finalizar.");
       return;
     }
+    if (preguntando.length) {
+      mostrarResultado("error", `Falta elegir de qué lote es ${nombreProducto(preguntando[0])}`, "Elegilo arriba antes de finalizar.");
+      return;
+    }
     const faltantes = sesion.lineas.filter((l) => l.cantidadEscaneada < l.cantidadPedida);
     const unidades = faltantes.reduce((s, l) => s + (l.cantidadPedida - l.cantidadEscaneada), 0);
     if (esSalidaSap(pedido.fuenteDocumento) && faltantes.length) {
@@ -780,12 +862,13 @@ async function vistaEscaneo() {
     if (!ok) return enfocar();
     // Lo preparado sale de la bodega pequeña al finalizar: tiene que estar registrado ahí y, si hay varios lotes,
     // se indica de cuál salió cada unidad.
-    const despacho = await prepararDespacho(sesion.lineas);
+    const despacho = await prepararDespacho(sesion.lineas, lotesElegidos);
     if (!despacho) return enfocar();
     try {
       const { data } = await api.finalizar(pickingId, despacho.lotes);
       guardarSesion(null);
       guardado.borrar(`cola.${pickingId}`);
+      guardado.borrar(claveLotes);
       lecturas = null;
       vistaResumen(data, pedido);
     } catch (error) {
@@ -803,7 +886,7 @@ async function vistaEscaneo() {
       `Datos de SAP ${hace(pedido.sincronizadoEn)}. Confirmá con el supervisor si el pedido sigue igual.`),
     bloqueo, desconexion,
     h("div", { class: "escaneo-layout" },
-      h("section", { class: "escaneo", "aria-label": "Lectura de códigos" }, cabezaLector, formulario, resultado, envio, progreso, resumen),
+      h("section", { class: "escaneo", "aria-label": "Lectura de códigos" }, cabezaLector, formulario, resultado, envio, progreso, resumen, preguntaLote),
       h("section", { "aria-label": "Líneas del pedido" },
         lista,
         h("div", { class: "acciones" },
@@ -822,11 +905,14 @@ async function vistaEscaneo() {
   enfocar();
   if (cola.pendientes) envio.textContent = `${cola.pendientes} lecturas pendientes de enviar…`;
   cola.reanudar();
+  // Al volver a una preparación empezada: los lotes de lo ya escaneado.
+  for (const itemCode of new Set(sesion.lineas.filter((l) => l.cantidadEscaneada > 0).map((l) => l.itemCode))) repartirLote(itemCode);
 }
 
 // Antes de cerrar una preparación: revisa la bodega pequeña de cada producto escaneado. Devuelve { lotes } para
 // enviar al finalizar, o null si falta mercadería o se canceló la elección de lotes.
-async function prepararDespacho(lineas) {
+// elegidos: los lotes elegidos al escanear (itemCode → { asignado }); si cubren todo, no se vuelve a preguntar.
+async function prepararDespacho(lineas, elegidos = {}) {
   const porProducto = unidadesPorProducto(lineas);
   if (!porProducto.size) return { lotes: [] };
   let fichas;
@@ -850,11 +936,15 @@ async function prepararDespacho(lineas) {
       "La preparación queda abierta con lo escaneado." ] });
     return null;
   }
-  return elegir.length ? elegirLotesDespacho(elegir) : { lotes: [] };
+  if (!elegir.length) return { lotes: [] };
+  const alEscanear = Object.fromEntries(elegir.map((p) => [p.itemCode, asignadoPorLote(elegidos[p.itemCode]?.asignado)]));
+  const listo = armarLotesDespacho(elegir, alEscanear);
+  return listo.problema ? elegirLotesDespacho(elegir, alEscanear) : listo;
 }
 
 // Varios lotes en la pequeña: la persona que preparó indica de cuál sacó cada unidad (el código de barras no lo dice).
-function elegirLotesDespacho(elegir) {
+// previo: lo elegido al escanear, para no escribirlo de nuevo.
+function elegirLotesDespacho(elegir, previo = {}) {
   return new Promise((resolver) => {
     let resuelto = false;
     const cerrar = (valor) => { resuelto = true; dialogo.close(); resolver(valor); };
@@ -864,7 +954,9 @@ function elegirLotesDespacho(elegir) {
       h("legend", {}, `${p.itemName} · salen ${cantidad(p.necesarias)}`),
       h("ul", { class: "despacho-lotes" }, p.lotes.map((l) => {
         const id = `despacho-${entradas.length}`;
-        const entrada = h("input", { id, class: "campo campo--numero", type: "number", min: "0", max: String(l.unidades), inputmode: "numeric", placeholder: "0" });
+        const antes = previo[p.itemCode]?.[l.id];
+        const entrada = h("input", { id, class: "campo campo--numero", type: "number", min: "0", max: String(l.unidades), inputmode: "numeric", placeholder: "0",
+          value: antes ? String(antes) : "" });
         entradas.push({ itemCode: p.itemCode, loteId: l.id, entrada });
         return h("li", {}, h("label", { for: id }, h("strong", {}, l.lote ? `Lote ${l.lote}` : "Sin lote"),
           h("span", { class: "suave" }, `${textoVencimiento(l.vencimiento)} · hay ${cantidad(l.unidades)}`)), entrada);
