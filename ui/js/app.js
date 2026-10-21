@@ -402,9 +402,12 @@ async function cambiarOperador() {
 async function vistaPedidos() {
   mostrarAmplio(navegacion("pedidos"), cargando("Cargando documentos para preparar…"));
   const pedidos = [];
+  // Traslados de SAP de la 01 a la 02: van primero, con la misma tarjeta (se pasan escaneando las cajas).
+  let entradas = [];
+  const cargarEntradas = () => api.trasladosEntrada().then((x) => { entradas = x.data; recordarBodegas(x.bodegas); }).catch(() => {});
   let cursor = null, paginas = 1, actualizadaEn = Date.now(), falloEn = null;
   try {
-    const respuesta = await api.pedidos();
+    const [respuesta] = await Promise.all([api.pedidos(), cargarEntradas()]);
     fuenteDocumentos = respuesta.fuente ?? fuenteDocumentos;
     pedidos.push(...respuesta.data); cursor = respuesta.siguienteCursor;
   } catch (error) { return mostrarError(error, vistaPedidos); }
@@ -433,6 +436,15 @@ async function vistaPedidos() {
         h("div", { class: "pedido__cliente" }, clienteDocumento(p)),
         h("div", { class: "pedido__meta" }, metaDocumento(p)),
         h("div", { class: "pedido__meta", "data-sap": p.sincronizadoEn }, `Datos de SAP ${hace(p.sincronizadoEn)}`))));
+  const tarjetaEntrada = (t) => h("li", {},
+    h("button", { class: "pedido pedido--traslado", type: "button", onclick: () => vistaTrasladoEntrada(t.docEntry) },
+      h("div", { class: "pedido__cabeza" },
+        h("div", { class: "pedido__numero" }, h("span", { class: "rotulo" }, "Traslado"), " ", String(t.docNum)),
+        h("span", { class: "insignia insignia--traslado" }, `De ${bodegaNombre("grande", { corto: true })} a ${bodegaNombre("pequena", { corto: true })}`),
+        icono("siguiente", "icono pedido__flecha")),
+      h("div", { class: "pedido__cuerpo" },
+        h("div", { class: "pedido__cliente" }, `Entrada a ${bodegaNombre("pequena", { corto: true })}`),
+        h("div", { class: "pedido__meta" }, `Fecha ${fecha(t.docDate)} · ${t.lineas.length} ${t.lineas.length === 1 ? "producto por pasar" : "productos por pasar"}`))));
   function tarjetaPreparado(p) {
     const textos = textosPreparado(p.preparado);
     return h("li", {},
@@ -457,17 +469,18 @@ async function vistaPedidos() {
     const visibles = vigentes.filter((p) => !filtro || String(p.docNum).includes(filtro) || (p.cliente?.cardName ?? "").toLowerCase().includes(filtro));
     const pendientes = visibles.filter((p) => !p.preparado);
     const preparados = visibles.filter((p) => p.preparado);
-    lista.replaceChildren(...pendientes.map(tarjetaPendiente));
+    const entradasVisibles = entradas.filter((t) => !filtro || String(t.docNum).includes(filtro) || "traslado".includes(filtro));
+    lista.replaceChildren(...entradasVisibles.map(tarjetaEntrada), ...pendientes.map(tarjetaPendiente));
     listaPreparados.replaceChildren(...preparados.map(tarjetaPreparado));
-    lista.hidden = pendientes.length === 0;
+    lista.hidden = pendientes.length + entradasVisibles.length === 0;
     seccionPreparados.hidden = preparados.length === 0;
     contadorPreparados.textContent = String(preparados.length);
     contadorPreparados.setAttribute("aria-label", `${preparados.length} pedidos preparados`);
     contador.textContent = `${vigentes.length}${cursor === null ? "" : "+"}`;
     contador.setAttribute("aria-label", `${contador.textContent} pedidos cargados`);
-    vacio.textContent = !vigentes.length ? "No hay documentos pendientes de preparación."
-      : !visibles.length ? "Ningún documento coincide con la búsqueda."
-        : !pendientes.length && !filtro ? "Todos los documentos de esta lista ya están preparados." : "";
+    vacio.textContent = !vigentes.length && !entradas.length ? "No hay documentos pendientes de preparación."
+      : !visibles.length && !entradasVisibles.length ? "Ningún documento coincide con la búsqueda."
+        : !pendientes.length && !entradasVisibles.length && !filtro ? "Todos los documentos de esta lista ya están preparados." : "";
     vacio.hidden = !vacio.textContent;
     masBoton.hidden = cursor === null;
     pintarActualizado();
@@ -495,6 +508,7 @@ async function vistaPedidos() {
     try {
       const nuevos = [];
       let siguiente = null;
+      await cargarEntradas();
       for (let pagina = 0; pagina < paginas; pagina++) {
         const respuesta = await api.pedidos(siguiente);
         nuevos.push(...respuesta.data); siguiente = respuesta.siguienteCursor;
@@ -614,6 +628,70 @@ async function vistaPedido(docEntry) {
     h("ul", { class: "lineas" }, aPreparar.map((l) =>
       tarjetaLinea(l.pedidoLineNum, datosLinea(l, lineasPorNumero, pedido.nombres), { pedida: l.cantidadPedida }))),
     empezar);
+}
+
+// Un traslado de SAP de la 01 a la 02, como un documento para preparar: sus productos con lo que falta pasar. Escanear
+// un producto (o una caja) abre su traspaso; ahí se elige el lote y se escanean las cajas.
+async function vistaTrasladoEntrada(docEntry, mensaje = null) {
+  mostrar(cargando("Cargando traslado…"));
+  let traslados;
+  try {
+    const respuesta = await api.trasladosEntrada();
+    traslados = respuesta.data; recordarBodegas(respuesta.bodegas);
+  } catch (error) { return mostrarError(error, () => vistaTrasladoEntrada(docEntry, mensaje)); }
+  const de = bodegaNombre("grande", { corto: true }), a = bodegaNombre("pequena", { corto: true });
+  const volver = boton("boton--volver", "volver", "Preparaciones", { onclick: () => vistaPedidos() });
+  const t = traslados.find((x) => x.docEntry === docEntry);
+  if (!t) return mostrar(volver, mensaje && aviso(mensaje.tipo, mensaje.texto, { role: "status" }),
+    aviso("ok", "Este traslado ya se pasó completo."), boton("boton--principal", "lista", "Volver a Preparaciones", { onclick: () => vistaPedidos() }));
+  const problema = aviso("error", "", { role: "alert", hidden: true });
+  const pasar = (l) => vistaTraspaso(l.itemCode, { desde: "traslado", linea: { ...l, docNum: t.docNum } });
+  async function leer(codigo) {
+    problema.hidden = true;
+    let itemCode = null;
+    try {
+      if (esCodigoCaja(codigo)) itemCode = (await api.caja(codigo.toUpperCase())).data.itemCode;
+      else {
+        const filas = (await api.buscarProductos(codigo)).data;
+        itemCode = filas.find((p) => p.itemCode === codigo || p.codigos.includes(codigo) || p.codigosCaja?.includes(codigo))?.itemCode ?? null;
+      }
+    } catch (error) { if (error.status === 401) return mostrarError(error); }
+    const l = t.lineas.find((x) => x.itemCode === itemCode);
+    if (l) return pasar(l);
+    textoAviso(problema, itemCode ? "Ese producto no está por pasar en este traslado." : `No se encontró un producto con el código ${codigo}.`);
+    problema.hidden = false;
+  }
+  const darPorPasada = async (l) => {
+    if (!(await confirmar({ titulo: "¿Ya se pasó?", aceptar: "Sí, ya se pasó", texto: [
+      `${l.itemName ?? l.itemCode}: ${unidadesTexto(l.pendientes)} del traslado ${t.docNum}.`,
+      `Queda como pasada sin mover nada en ${de} ni en ${a}. Usalo solo si ya se pasó antes.`] }))) return;
+    try { await api.cerrarLineaTraslado(t.docEntry, l.lineNum); } catch (error) {
+      if (error.status === 401) return mostrarError(error);
+      return informar({ titulo: "No se pudo", texto: textoFalla(error) });
+    }
+    vistaTrasladoEntrada(docEntry, { tipo: "ok", texto: `Listo: ${l.itemName ?? l.itemCode} quedó como pasado.` });
+  };
+  const notaLinea = (l) => (l.enGrande < l.pendientes ? `En ${de} hay ${unidadesTexto(l.enGrande)}: falta contar o recibir ${de} de este producto.`
+    : l.sapPorPasar !== null && l.sapPorPasar < l.pendientes ? "SAP ya no marca esto por pasar: puede que ya se haya pasado." : null);
+  const lector = campoLector({ placeholder: "Escaneá un producto o una caja del traslado", alLeer: leer });
+  mostrar(volver,
+    h("div", { class: "encabezado" }, tituloPedido(t.docNum, "traslado")),
+    h("div", { class: "tarjeta detalle-pedido" }, h("span", { class: "rotulo" }, "Traslado de SAP"),
+      h("div", { class: "pedido__cliente" }, `De ${de} a ${a}`),
+      h("div", { class: "pedido__meta" }, `Fecha ${fecha(t.docDate)} · ${t.lineas.length} ${t.lineas.length === 1 ? "producto por pasar" : "productos por pasar"}`)),
+    mensaje && aviso(mensaje.tipo, mensaje.texto, { role: "status" }),
+    lector.seccion, problema,
+    h("h2", {}, "A pasar"),
+    h("ul", { class: "lineas" }, t.lineas.map((l) => {
+      const li = tarjetaLinea(l.lineNum, { itemName: l.itemName, itemCode: l.itemCode, warehouseCode: `${de.replace(/^la /, "")} → ${a.replace(/^la /, "")}` },
+        { pedida: l.unidades, escaneada: l.aceptadas });
+      const nota = notaLinea(l);
+      li.append(nota ? h("p", { class: "fila-admin__nota" }, icono("info"), nota) : "",
+        h("div", { class: "fila" }, boton("boton--principal", "mover", "Pasar", { onclick: () => pasar(l) }),
+          esSupervisor() && boton("", "completa", "Ya se pasó", { onclick: () => darPorPasada(l) })));
+      return li;
+    })));
+  lector.entrada.focus();
 }
 
 // ---------------------------------------------------------------------------
@@ -2302,7 +2380,9 @@ async function vistaTraspaso(itemCode, { desde = "pendientes", manual = null, li
   try { p = (await api.producto(itemCode)).data; } catch (error) { return mostrarError(error, () => vistaTraspaso(itemCode, { desde })); }
   recordarBodegas(p.bodegas);
   const de = bodegaNombre("grande", { corto: true }), a = bodegaNombre("pequena", { corto: true });
-  const volver = desde === "producto" ? volverA(p.itemName, () => vistaProducto(itemCode)) : volverA("Traspasos por aceptar", () => vistaPendientes("pasar"));
+  const volver = desde === "producto" ? volverA(p.itemName, () => vistaProducto(itemCode))
+    : desde === "traslado" && linea ? volverA(`Traslado ${linea.docNum}`, () => vistaTrasladoEntrada(linea.docEntry))
+      : volverA("Traspasos por aceptar", () => vistaPendientes("pasar"));
   const encabezado = h("div", { class: "encabezado" }, h("div", {}, h("h1", {}, `Traspaso a ${a}`),
     h("p", { class: "encabezado__sub" }, p.itemName, " · ", h("span", { class: "codigo" }, p.itemCode))));
   const claveGuardado = `traspaso.${itemCode}`;
@@ -2351,6 +2431,7 @@ async function vistaTraspaso(itemCode, { desde = "pendientes", manual = null, li
       const listo = { tipo: "ok", texto: `Listo: ${unidadesTexto(data.unidades)} ${linea ? `de ${p.itemName} ` : ""}pasaron a ${a} (${data.lotes.map((l) => `${l.lote ?? "sin lote"}: ${numero(l.unidades)}`).join(" · ")}).`
         + (vacias.length ? ` ${vacias.length === 1 ? "Quedó vacía la caja" : "Quedaron vacías las cajas"} ${vacias.join(", ")}.` : "") };
       // De un traslado se vuelve a la lista para seguir con el producto siguiente.
+      if (linea && desde === "traslado") return vistaTrasladoEntrada(linea.docEntry, listo);
       if (linea && desde !== "producto") return vistaPendientes("pasar", listo);
       vistaProducto(itemCode, listo);
     } catch (error) {
@@ -2359,7 +2440,8 @@ async function vistaTraspaso(itemCode, { desde = "pendientes", manual = null, li
       if (error.codigo === "CANTIDAD_CAMBIO") {
         guardado.borrar(claveGuardado);
         return poner(cuerpo, aviso("alerta", error.mensaje, { role: "alert" }),
-          boton("boton--principal", "actualizar", "Ver de nuevo", { onclick: () => (linea ? vistaPendientes("pasar") : vistaTraspaso(itemCode, { desde })) }));
+          boton("boton--principal", "actualizar", "Ver de nuevo", { onclick: () => (linea && desde === "traslado" ? vistaTrasladoEntrada(linea.docEntry)
+            : linea ? vistaPendientes("pasar") : vistaTraspaso(itemCode, { desde })) }));
       }
       mostrarProblema(textoFalla(error));
     }
