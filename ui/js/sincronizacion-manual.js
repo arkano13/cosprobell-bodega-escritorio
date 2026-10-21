@@ -2,10 +2,11 @@ const enCurso = solicitud => ["pendiente", "sincronizando"].includes(solicitud?.
 
 export function presentacionManual({ datos, consultando, enviando, incierto, error }) {
   const s = datos?.solicitud;
-  const nombres = { productos: "productos", pedidos: "pedidos", facturasPreparacion: "facturas", trasladosPreparacion: "traslados",
+  // Los traslados de la 02 y los de la 01 a la 02 se nombran juntos.
+  const nombres = { productos: "productos", pedidos: "pedidos", facturasPreparacion: "facturas", trasladosPreparacion: "traslados", trasladosEntrada: "traslados",
     existencias: "existencias", clientes: "clientes", unidades: "unidades de medida", almacenes: "almacenes",
     codigosBarras: "códigos de barras", listasMateriales: "combos" };
-  const alcance = new Intl.ListFormat("es", { type: "conjunction" }).format((datos?.entidades ?? []).map(e => nombres[e] ?? e));
+  const alcance = new Intl.ListFormat("es", { type: "conjunction" }).format([...new Set((datos?.entidades ?? []).map(e => nombres[e] ?? e))]);
   let texto = "Consultando disponibilidad…", tipo = "info";
   if (datos) {
     texto = `Podés actualizar ${alcance}.`;

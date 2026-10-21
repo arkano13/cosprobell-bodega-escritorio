@@ -93,4 +93,6 @@ test("el botón nombra lo que va a pedir: facturas y traslados", async () => {
   assert.equal(p.boton, "Actualizar facturas y traslados");
   assert.equal(p.texto, "Podés actualizar facturas y traslados.");
   assert.equal(p.deshabilitado, false);
+  const conEntrada = presentacionManual({ datos: { entidades: ["facturasPreparacion", "trasladosPreparacion", "trasladosEntrada"], solicitud: null } });
+  assert.equal(conEntrada.boton, "Actualizar facturas y traslados", "los de la 01 a la 02 van con los traslados");
 });

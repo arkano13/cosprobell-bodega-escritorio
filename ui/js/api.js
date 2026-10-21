@@ -95,6 +95,9 @@ export function crearApi({ token, base = "", fetchImpl = (...args) => globalThis
     buscarProductos: (buscar) => pedir("GET", `/inventario/productos?${new URLSearchParams({ buscar, limit: "20" })}`),
     producto: (itemCode) => pedir("GET", `/inventario/productos/${encodeURIComponent(itemCode)}`),
     pendientes: () => pedir("GET", "/inventario/pendientes"),
+    // Traslados de SAP de la 01 a la 02 con lo que falta pasar de cada línea; el supervisor da una línea por pasada.
+    trasladosEntrada: () => pedir("GET", "/inventario/traslados"),
+    cerrarLineaTraslado: (docEntry, lineNum) => pedir("POST", `/inventario/traslados/${docEntry}/lineas/${lineNum}/cerrar`, {}),
     conteoInicial: ({ buscar = "", pagina = 0 } = {}) => pedir("GET", `/inventario/pendientes/inicial?${new URLSearchParams({
       pagina: String(pagina), limit: "50", ...(buscar ? { buscar } : {}) })}`),
     // Todos los productos de las bodegas. filtro: todos, grande, pequena, solo_sap o diferencia.
