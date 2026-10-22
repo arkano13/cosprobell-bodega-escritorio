@@ -3,7 +3,7 @@ const numero = (valor) => Number(valor).toLocaleString("es-HN");
 const hora = (iso) => new Date(iso).toLocaleTimeString("es-HN", { hour: "numeric", minute: "2-digit" });
 
 export const NOMBRES_DATOS = {
-  facturasPreparacion: "Facturas para preparar", trasladosPreparacion: "Traslados para preparar", pedidos: "Pedidos", clientes: "Clientes", productos: "Productos", unidades: "Unidades de medida", codigosBarras: "Códigos de barras",
+  facturasPreparacion: "Facturas para preparar", trasladosPreparacion: "Traslados para preparar", trasladosEntrada: "Traslados de la 01 a la 02", pedidos: "Pedidos", clientes: "Clientes", productos: "Productos", unidades: "Unidades de medida", codigosBarras: "Códigos de barras",
   almacenes: "Almacenes", existencias: "Existencias por almacén", documentos: "Entradas, salidas y devoluciones",
 };
 
