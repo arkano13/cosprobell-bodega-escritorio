@@ -2505,6 +2505,11 @@ async function vistaTraspaso(itemCode, { desde = "pendientes", manual = null, li
   const cajas = cajasDeLaGrande(p.lotes);
   const recuperado = origenPrevio === origen ? recuperarTraspaso(previo, { unidades: total, cajas }) : null;
   let escaneadas = recuperado?.escaneadas ?? [];
+  // Sin código de caja (por ejemplo, cajas de tintes con varios colores, guardadas como sueltas) no se pide escanear:
+  // se eligen los lotes, con una advertencia. Si alguien escanea igual, se puede volver a escanear.
+  const sinCodigoCaja = !p.codigosCaja?.length;
+  if (sinCodigoCaja && !escaneadas.length) modo = "lotes";
+  const avisoSinCodigo = () => aviso("alerta", `${p.itemName ?? itemCode} no cuenta con código de caja: no hace falta escanear. Revisá de qué lotes salió y aceptá.`);
   const arriba = h("div", {});
   const cuerpo = h("div", {});
   const problema = aviso("error", "", { role: "alert", hidden: true });
@@ -2626,11 +2631,12 @@ async function vistaTraspaso(itemCode, { desde = "pendientes", manual = null, li
             : aviso("alerta", `No quedan cajas de este producto en ${de}. Avisale al supervisor.`)),
         h("section", { class: "traspaso-paso", "aria-labelledby": "traspaso-paso-2" },
           h("h2", { id: "traspaso-paso-2" }, loteElegido ? `2. Escaneá cada caja del lote ${loteElegido.lote ?? "sin lote"} (vence ${textoVencimiento(loteElegido.vencimiento)})` : "2. Escaneá cada caja"),
-          !p.codigosCaja?.length && aviso("alerta", `Este producto no tiene registrado el código de barras de la caja: la primera vez que lo escanees te pregunta si es de ${p.itemName}.`),
+          sinCodigoCaja && avisoSinCodigo(),
           lector.seccion)],
       h("div", { class: "fila" }, aceptarBoton,
         escaneadas.length > 0 && boton("", "borrar", "Quitar la última caja", { onclick: () => { escaneadas = escaneadas.slice(0, -1); problema.hidden = true; pintar(); } }),
-        esSupervisor() && boton("", "lista", "Aceptar sin escanear", { onclick: () => { modo = "lotes"; problema.hidden = true; pintar(); } })));
+        (esSupervisor() || sinCodigoCaja) && boton("", "lista", sinCodigoCaja ? "Pasar sin escanear" : "Aceptar sin escanear",
+          { onclick: () => { modo = "lotes"; problema.hidden = true; pintar(); } })));
     if (listo) aceptarBoton.focus(); else lector.entrada.focus();
 
     async function elegirLote(l, recomendado) {
@@ -2676,7 +2682,7 @@ async function vistaTraspaso(itemCode, { desde = "pendientes", manual = null, li
   }
 
   const pintar = () => {
-    poner(arriba, modo === "escanear" ? null
+    poner(arriba, modo === "escanear" ? null : sinCodigoCaja ? avisoSinCodigo()
       : aviso("info", traslado ? `Traslado ${traslado}: pasan ${unidadesTexto(total)} de ${de} a ${a}. Sin escanear (supervisor): elegí de qué lotes y aceptá.`
         : `SAP pasó ${unidadesTexto(total)} de ${de} a ${a}. Sin escanear (supervisor): revisá la sugerencia y aceptá.`));
     return modo === "escanear" ? pintarEscaneo() : eligiendo ? pintarEleccion() : pintarSugerencia();
