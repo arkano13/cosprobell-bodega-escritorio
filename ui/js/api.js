@@ -97,6 +97,16 @@ export function crearApi({ token, base = "", fetchImpl = (...args) => globalThis
     pendientes: () => pedir("GET", "/inventario/pendientes"),
     // Traslados de SAP de la 01 a la 02 con lo que falta pasar de cada línea; el supervisor da una línea por pasada.
     trasladosEntrada: () => pedir("GET", "/inventario/traslados"),
+    // Auditorías de bodega: el supervisor inicia, termina y ve el resultado; todos escanean.
+    auditorias: () => pedir("GET", "/inventario/auditorias"),
+    historialAuditorias: () => pedir("GET", "/inventario/auditorias/historial?limit=20"),
+    iniciarAuditoria: (almacen) => pedir("POST", "/inventario/auditorias", { almacen }),
+    auditoria: (id) => pedir("GET", `/inventario/auditorias/${id}`),
+    leerAuditoria: (id, codigo, operacionId) => pedir("POST", `/inventario/auditorias/${id}/lecturas`, { codigo, operacionId }),
+    quitarUltimaAuditoria: (id) => pedir("POST", `/inventario/auditorias/${id}/quitar-ultima`, {}),
+    terminarAuditoria: (id) => pedir("POST", `/inventario/auditorias/${id}/terminar`, {}),
+    anularAuditoria: (id) => pedir("POST", `/inventario/auditorias/${id}/anular`, {}),
+    resultadoAuditoria: (id) => pedir("GET", `/inventario/auditorias/${id}/resultado`),
     cerrarLineaTraslado: (docEntry, lineNum) => pedir("POST", `/inventario/traslados/${docEntry}/lineas/${lineNum}/cerrar`, {}),
     conteoInicial: ({ buscar = "", pagina = 0 } = {}) => pedir("GET", `/inventario/pendientes/inicial?${new URLSearchParams({
       pagina: String(pagina), limit: "50", ...(buscar ? { buscar } : {}) })}`),

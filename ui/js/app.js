@@ -12,6 +12,7 @@ import { conSigno, destacadosCuadre, nombreArchivoCuadre, notaCuadre, porcentaje
 import { REPORTES, crearReportesBodega } from "./reportes-bodega.js";
 import { crearOperacion } from "./operaciones.js";
 import { barras } from "./code128.js";
+import { conDiferencia, descripcionAlmacen, nombreAlmacen, textoAvance, textoComparacion, textoDiferencia, textoGrupo } from "./auditorias.js";
 
 // ---------------------------------------------------------------------------
 // Utilidades
@@ -1845,7 +1846,8 @@ async function vistaInventario() {
     h("div", { class: "acciones-inventario" },
       accion("contar", "Contar", () => vistaConteo()),
       accion("caja", "Recibir", () => vistaBuscar({ proposito: "recibir" })),
-      accion("lista", "Productos", () => vistaProductos())),
+      accion("lista", "Productos", () => vistaProductos()),
+      accion("buscar", "Auditar", () => vistaAuditorias())),
     h("div", { class: "bodegas" },
       tarjetaBodega("grande", "caja", [cifra(r.grande.cajas, "cajas"), cifra(r.grande.abiertas, "abiertas"), cifra(r.grande.productos, "productos"),
         cifra(r.grande.unidades, "unidades")]),
@@ -2689,6 +2691,212 @@ async function vistaTraspaso(itemCode, { desde = "pendientes", manual = null, li
   };
   mostrarInventario(volver, encabezado, arriba, cuerpo);
   pintar();
+}
+
+// ---------------------------------------------------------------------------
+// Auditoría de bodega: se escanea todo lo que hay, unidad por unidad, y al terminar se compara con la app y con SAP.
+// El supervisor la inicia, la termina y ve el resultado; los operadores se unen para escanear. Solo informa.
+// ---------------------------------------------------------------------------
+
+async function vistaAuditorias() {
+  mostrarInventario(cargando("Cargando bodegas…"));
+  let almacenes, historial = [];
+  try {
+    [almacenes, historial] = await Promise.all([api.auditorias().then((r) => r.data),
+      esSupervisor() ? api.historialAuditorias().then((r) => r.data).catch(() => []) : []]);
+  } catch (error) { return mostrarError(error, () => vistaAuditorias()); }
+  const elegir = async (a) => {
+    if (a.enCurso) return vistaAuditoria(a.enCurso.id);
+    if (!esSupervisor()) return informar({ titulo: "No hay una auditoría en curso", texto: `La auditoría de ${nombreAlmacen(a)} la inicia el supervisor. Después te unís para escanear.` });
+    if (!(await confirmar({ titulo: `¿Auditar ${nombreAlmacen(a)}?`, aceptar: "Iniciar auditoría", texto: [
+      "Se escanea todo lo que hay, unidad por unidad. Mientras escanean no se muestra lo que dice el sistema.",
+      `${textoComparacion(a)} al terminar. Lo que no se escanee cuenta como 0.`] }))) return;
+    try { vistaAuditoria((await api.iniciarAuditoria(a.almacen)).data.id); } catch (error) {
+      if (error.status === 401) return mostrarError(error);
+      await informar({ titulo: "No se pudo iniciar", texto: textoFalla(error) });
+      vistaAuditorias();
+    }
+  };
+  const tarjeta = (a) => h("li", {}, h("button", { class: "pedido", type: "button", onclick: () => elegir(a) },
+    h("div", { class: "pedido__cabeza" }, h("div", { class: "pedido__numero" }, h("span", { class: "rotulo" }, a.tipo === "otro" ? "Almacén" : "Bodega"), " ", a.almacen),
+      a.enCurso && insignia("alerta", null, "En curso"), icono("siguiente", "icono pedido__flecha")),
+    h("div", { class: "pedido__cuerpo" },
+      h("div", { class: "pedido__cliente" }, descripcionAlmacen(a)),
+      h("div", { class: "pedido__meta" }, a.enCurso ? `Iniciada por ${a.enCurso.iniciadaPor ?? "el supervisor"} · ${fechaHora(a.enCurso.iniciadaEn)}`
+        : a.ultima ? `Última auditoría: ${fechaHora(a.ultima.terminadaEn)}` : "Última auditoría: nunca"),
+      h("div", { class: "pedido__meta" }, a.enCurso ? `${textoAvance(a.enCurso.unidades, 0).split(" · ")[0]} escaneadas por ${a.enCurso.personas} ${a.enCurso.personas === 1 ? "persona" : "personas"}`
+        : textoComparacion(a)))));
+  const propias = almacenes.filter((a) => a.tipo !== "otro"), otros = almacenes.filter((a) => a.tipo === "otro");
+  mostrarInventario(volverA("Inventario", () => vistaInventario()),
+    h("div", { class: "encabezado" }, h("div", {}, h("h1", {}, "Auditar bodega"),
+      h("p", { class: "encabezado__sub" }, "Se escanea todo lo que hay, unidad por unidad, sin lotes, vencimientos ni códigos de caja. Al terminar se compara con lo que dice el sistema."))),
+    h("ul", { class: "pedidos" }, propias.map(tarjeta)),
+    otros.length > 0 && [h("h2", { class: "titulo-seccion" }, "Otros almacenes"),
+      h("p", { class: "suave" }, "La app no los lleva: se comparan solo con SAP, si el puente manda sus existencias."),
+      h("ul", { class: "pedidos" }, otros.map(tarjeta))],
+    aviso("info", esSupervisor() ? "Iniciá la auditoría y los operadores se unen desde esta pantalla para escanear. Terminarla y ver el resultado es tuyo."
+      : "Elegí una auditoría en curso para escanear. La inicia y la termina el supervisor."),
+    esSupervisor() && historial.length > 0 && [h("h2", { class: "titulo-seccion" }, "Auditorías terminadas"),
+      h("ul", { class: "filas" }, historial.map((x) => filaAdmin({ nombre: nombreAlmacen(almacenes.find((a) => a.almacen === x.almacen) ?? { almacen: x.almacen, tipo: "otro" }),
+        detalle: [`${fechaHora(x.iniciadaEn)} a ${horaCorta(x.terminadaEn)}`, x.terminadaPor ? ` · ${x.terminadaPor}` : ""],
+        acciones: [boton("", "siguiente", "Ver resultado", { onclick: () => vistaResultadoAuditoria(x.id) })] })))]);
+}
+
+async function vistaAuditoria(id) {
+  mostrarInventario(cargando("Cargando auditoría…"));
+  let a;
+  try { a = (await api.auditoria(id)).data; } catch (error) { return mostrarError(error, () => vistaAuditoria(id)); }
+  if (a.estado !== "en_curso") return esSupervisor() && a.estado === "terminada" ? vistaResultadoAuditoria(id) : vistaAuditorias();
+  // Lo escaneado: productos (el último leído arriba) y el total. Se actualiza con cada lectura y con lo que escanean los demás.
+  let productos = a.productos, total = a.unidades, ultimo = null;
+  const lista = h("ul", { class: "lineas" });
+  const resumen = h("div", { class: "fila fila--entre resumen" });
+  const resultado = h("div", { class: "resultado", role: "status", "aria-live": "assertive" });
+  const desconexion = h("div", {});
+  const pintarResultado = (tipo, titulo, detalle) => {
+    resultado.className = `resultado${tipo ? ` resultado--${tipo === "ok" ? "ok" : "error"}` : ""}`;
+    resultado.replaceChildren(tipo ? icono(tipo === "ok" ? "aceptada" : "rechazada") : h("span", { class: "resultado__laser" }, icono("escaner")),
+      h("div", { class: "resultado__texto" }, h("span", { class: "resultado__titulo" }, titulo), detalle && h("small", {}, detalle)));
+  };
+  const pintarLista = () => {
+    poner(resumen, h("strong", {}, textoAvance(total, productos.length)), h("span", { class: "suave" }, "Lo que dice el sistema se ve al terminar"));
+    lista.replaceChildren(...productos.map((p) => h("li", { class: `linea${p.itemCode === ultimo ? " linea--reciente" : ""}` },
+      h("div", { class: "linea__nombre" }, p.itemName ?? p.itemCode), h("div", { class: "linea__detalle" }, h("span", { class: "codigo" }, p.itemCode)),
+      h("div", { class: "linea__cantidad" }, numero(p.unidades), h("span", { class: "linea__total" }, p.unidades === 1 ? " escaneada" : " escaneadas")))));
+    if (!productos.length) lista.replaceChildren(h("li", { class: "suave" }, "Todavía no se escaneó nada."));
+  };
+  const actualizarProducto = (d) => {
+    total = d.unidades; ultimo = d.itemCode;
+    productos = [{ itemCode: d.itemCode, itemName: d.itemName, unidades: d.unidadesProducto }, ...productos.filter((p) => p.itemCode !== d.itemCode)]
+      .filter((p) => p.unidades > 0);
+    pintarLista();
+  };
+  const cola = crearColaLecturas({
+    enviar: (l) => api.leerAuditoria(id, l.codigo, l.operacionId),
+    guardar: (pendientes) => guardado.escribir(`auditoria.${id}`, pendientes),
+    pendientes: guardado.leer(`auditoria.${id}`) ?? [],
+    alCambiar: (e) => {
+      if (e.tipo === "aceptada") {
+        const d = e.respuesta.data;
+        actualizarProducto(d);
+        pintarResultado("ok", d.itemName, `Van ${numero(d.unidadesProducto)} de este producto`);
+        desconexion.replaceChildren();
+      } else if (e.tipo === "rechazada") {
+        if (e.error?.codigo === "AUDITORIA_CERRADA") return vistaAuditoria(id);
+        pintarResultado("error", `No se contó: ${e.lectura.codigo}`, e.error?.mensaje ?? "Error al leer");
+      } else if (e.tipo === "detenida") {
+        if (e.error?.status === 401) return mostrarError(e.error);
+        poner(desconexion, aviso("alerta", `Sin conexión. ${e.enCola} ${e.enCola === 1 ? "lectura pendiente" : "lecturas pendientes"}: se envían al reconectar, sin contarse dos veces.`, {},
+          boton("", "actualizar", "Reintentar", { onclick: () => cola.reanudar() })));
+      }
+    },
+  });
+  const lector = campoLector({ placeholder: "Escaneá cada unidad", alLeer: (codigo) => cola.agregar(codigo) });
+  const quitar = boton("", "borrar", "Quitar la última lectura", { onclick: async () => {
+    quitar.disabled = true;
+    try {
+      const d = (await api.quitarUltimaAuditoria(id)).data;
+      actualizarProducto(d);
+      pintarResultado("ok", `Se quitó 1 de ${d.itemName}`, `Quedan ${numero(d.unidadesProducto)} de este producto`);
+    } catch (error) {
+      if (error.status === 401) return mostrarError(error);
+      pintarResultado("error", "No se pudo quitar", textoFalla(error));
+    } finally { quitar.disabled = false; lector.entrada.focus(); }
+  } });
+  const terminar = async () => {
+    if (cola.pendientes) return informar({ titulo: "Quedan lecturas por enviar", texto: "Esperá a que se envíen todas antes de terminar." });
+    if (!(await confirmar({ titulo: "¿Terminar la auditoría?", aceptar: "Terminar y ver el resultado", texto: [
+      `${textoAvance(total, productos.length)} escaneadas.`, "Lo que no se escaneó cuenta como 0. Después de terminar nadie puede seguir escaneando."] }))) return;
+    try { await api.terminarAuditoria(id); guardado.borrar(`auditoria.${id}`); vistaResultadoAuditoria(id); } catch (error) {
+      if (error.status === 401) return mostrarError(error);
+      informar({ titulo: "No se pudo terminar", texto: textoFalla(error) });
+    }
+  };
+  const anular = async () => {
+    if (!(await confirmar({ titulo: "¿Anular la auditoría?", aceptar: "Anular", peligro: true,
+      texto: "Se descarta todo lo escaneado y no queda resultado. Para empezar de nuevo, iniciá otra." }))) return;
+    try { await api.anularAuditoria(id); guardado.borrar(`auditoria.${id}`); vistaAuditorias(); } catch (error) {
+      if (error.status === 401) return mostrarError(error);
+      informar({ titulo: "No se pudo anular", texto: textoFalla(error) });
+    }
+  };
+  // Lo que escanean los demás aparece cada 15 segundos.
+  let vigente = true;
+  const refresco = setInterval(async () => {
+    if (cola.pendientes) return;
+    try {
+      const d = (await api.auditoria(id)).data;
+      if (!vigente) return;
+      if (d.estado !== "en_curso") return vistaAuditoria(id);
+      productos = d.productos; total = d.unidades; pintarLista();
+    } catch { /* sin conexión: se intenta en el próximo */ }
+  }, 15000);
+  limpiezas.push(() => { vigente = false; clearInterval(refresco); });
+  pintarResultado(null, "Escaneá cada unidad que hay en la bodega");
+  pintarLista();
+  const personas = a.personas.length ? ` · escaneando ${a.personas.join(", ")}` : "";
+  mostrarInventario(h("div", { class: "encabezado" }, h("div", {}, h("h1", {}, `Auditoría · ${a.almacen}`),
+    h("div", { class: "encabezado__sub" }, `Iniciada por ${a.iniciadaPor ?? "el supervisor"} · ${fechaHora(a.iniciadaEn)}${personas}`))),
+  h("div", { class: "escaneo-layout" },
+    h("section", { class: "escaneo" }, lector.seccion.firstChild, lector.seccion.querySelector("form"), resultado, resumen, desconexion),
+    h("section", {}, h("h2", {}, "Escaneado"), lista,
+      h("div", { class: "acciones" }, quitar,
+        esSupervisor() && boton("boton--principal", "finalizar", "Terminar auditoría", { onclick: terminar }),
+        boton("", "volver", "Salir (la auditoría sigue)", { onclick: () => vistaAuditorias() }),
+        esSupervisor() && boton("boton--peligro", "borrar", "Anular", { onclick: anular })))));
+  cola.procesar();
+  lector.entrada.focus();
+}
+
+async function vistaResultadoAuditoria(id) {
+  mostrarInventario(cargando("Cargando resultado…"));
+  let r;
+  try { r = (await api.resultadoAuditoria(id)).data; } catch (error) { return mostrarError(error, () => vistaResultadoAuditoria(id)); }
+  let soloDiferencias = false;
+  const conApp = r.resumen.contraApp !== null, conSap = r.resumen.contraSap !== null;
+  const contra = conApp ? r.resumen.contraApp : r.resumen.contraSap;
+  const sub = `${fechaHora(r.iniciadaEn)} a ${horaCorta(r.terminadaEn)} · ${r.personas.length} ${r.personas.length === 1 ? "persona" : "personas"} · ${numero(r.resumen.escaneado)} unidades escaneadas`;
+  const celda = (d) => {
+    const texto = textoDiferencia(d);
+    return h("td", { class: `tabla__numero ${d === 0 ? "auditoria--cumple" : d < 0 ? "auditoria--falta" : "auditoria--sobra"}` }, texto);
+  };
+  const tabla = (filas) => h("div", { class: "tabla-envoltura" }, h("table", { class: "tabla tabla-auditoria" },
+    h("thead", {}, h("tr", {}, h("th", { scope: "col" }, "Producto"), h("th", { scope: "col", class: "tabla__numero" }, "Escaneado"),
+      conApp && h("th", { scope: "col", class: "tabla__numero" }, "App"), conSap && h("th", { scope: "col", class: "tabla__numero" }, "SAP"),
+      conApp && h("th", { scope: "col", class: "tabla__numero" }, "Contra la app"), conSap && h("th", { scope: "col", class: "tabla__numero" }, "Contra SAP"))),
+    h("tbody", {}, filas.map((f) => h("tr", {}, h("th", { scope: "row" }, f.itemName, h("div", { class: "suave codigo" }, f.itemCode)),
+      h("td", { class: "tabla__numero" }, numero(f.escaneado)), conApp && h("td", { class: "tabla__numero" }, numero(f.app)),
+      conSap && h("td", { class: "tabla__numero" }, numero(f.sap)), conApp && celda(f.diferenciaApp), conSap && celda(f.diferenciaSap))))));
+  const cifras = contra ? h("div", { class: "cifras" },
+    h("div", { class: "cifra" }, h("strong", {}, numero(contra.cumplen)), h("span", {}, "cumplen")),
+    h("div", { class: "cifra" }, h("strong", {}, numero(contra.faltan.productos)), h("span", {}, `faltan · ${textoGrupo(contra.faltan).split(" · ")[1] ?? "0 unidades"}`)),
+    h("div", { class: "cifra" }, h("strong", {}, numero(contra.sobran.productos)), h("span", {}, `sobran · ${textoGrupo(contra.sobran).split(" · ")[1] ?? "0 unidades"}`))) : null;
+  const nota = conApp ? `"Faltan" y "sobran" comparan lo escaneado con la app.${!conSap ? " SAP no manda existencias de este almacén."
+    : r.tipo === "pequena" ? " La columna SAP ya cuenta lo facturado sin preparar y lo preparado sin entregar." : ""} Lo que no se escaneó cuenta como 0.`
+    : conSap ? "La app no lleva este almacén: se compara solo con SAP. Lo que no se escaneó cuenta como 0."
+      : "La app no lleva este almacén y SAP no manda sus existencias: solo se muestra lo escaneado.";
+  const zonaTabla = h("div", {});
+  const filtro = boton("", "lista", "Ver solo diferencias", { onclick: () => { soloDiferencias = !soloDiferencias; pintar(); } });
+  const pintar = () => {
+    const filas = soloDiferencias ? conDiferencia(r.filas) : r.filas;
+    filtro.lastChild.textContent = soloDiferencias ? "Ver todo" : "Ver solo diferencias";
+    poner(zonaTabla, filas.length ? tabla(filas) : aviso("ok", soloDiferencias ? "No hay diferencias: todo cumple." : "No hay productos en este almacén."));
+  };
+  const descargar = boton("boton--principal", "impresora", "Descargar PDF", { onclick: async () => {
+    descargar.disabled = true;
+    const res = await guardarReportePdf({ titulo: `Auditoría · ${r.almacen}`, sub, nodos: [cifras?.cloneNode(true), h("p", {}, nota), tabla(r.filas)],
+      nombre: `Auditoria-${r.almacen}-${String(r.terminadaEn).slice(0, 10)}.pdf`, pie: `Bodega Cosprobell · Auditoría ${r.almacen} · ${fechaHora(r.terminadaEn)}` });
+    descargar.disabled = false;
+    if (res.ok) informar({ titulo: "PDF guardado", texto: res.archivo });
+    else if (res.motivo === "ocupado") informar({ titulo: "No se pudo guardar", texto: "El archivo está abierto en otro programa. Cerralo o elegí otro nombre." });
+    else if (!res.cancelado) informar({ titulo: "No se pudo guardar el PDF", texto: "Probá de nuevo." });
+  } });
+  if (!window.escritorio?.guardarPdf) descargar.hidden = true;
+  pintar();
+  mostrarInventario(volverA("Auditar bodega", () => vistaAuditorias()),
+    h("div", { class: "encabezado" }, h("div", {}, h("h1", {}, `Resultado · ${r.almacen}`), h("div", { class: "encabezado__sub" }, sub))),
+    cifras && h("section", { class: "tarjeta" }, h("h2", {}, conApp ? "Contra la app" : "Contra SAP"), cifras),
+    aviso("info", nota), zonaTabla, h("div", { class: "fila" }, descargar, filtro));
 }
 
 async function vistaCaja(codigo, mensaje = null) {

@@ -725,3 +725,20 @@ test("lote al escanear: las unidades van al lote elegido hasta lo que tiene; si 
   assert.deepEqual(asignarEscaneadas({ actual: 2, asignado: cambio.asignado }, 5, lotes).asignado, [{ id: 15, n: 4 }, { id: 2, n: 1 }], "si baja, se quita de lo último");
   assert.deepEqual(asignadoPorLote(cambio.asignado), { 15: 4, 2: 2 });
 });
+
+test("auditoría: nombres de almacenes, avance y diferencias", async () => {
+  const { conDiferencia, descripcionAlmacen, nombreAlmacen, textoAvance, textoComparacion, textoDiferencia, textoGrupo } = await import("../ui/js/auditorias.js");
+  assert.equal(nombreAlmacen({ almacen: "02", tipo: "pequena" }), "Bodega 02");
+  assert.equal(nombreAlmacen({ almacen: "03", tipo: "conteo" }), "Almacén 03 (solo conteo)");
+  assert.equal(nombreAlmacen({ almacen: "V07", tipo: "otro", nombre: "Vendedor 7" }), "V07 · Vendedor 7");
+  assert.equal(textoComparacion({ comparaApp: false }), "Se compara solo con SAP");
+  assert.equal(descripcionAlmacen({ almacen: "02", tipo: "pequena", nombre: "Despacho" }), "Bodega pequeña · Despacho");
+  assert.equal(descripcionAlmacen({ almacen: "V07", tipo: "otro", nombre: "V07" }), "Almacén V07");
+  assert.equal(textoAvance(1, 1), "1 unidad · 1 producto");
+  assert.equal(textoAvance(1284, 47), "1284 unidades · 47 productos".replace("1284", (1284).toLocaleString("es-HN")));
+  assert.deepEqual([0, -6, 2, null].map(textoDiferencia), ["Cumple", "−6", "+2", null]);
+  assert.equal(textoGrupo({ productos: 0, unidades: 0 }), "Ninguno");
+  assert.equal(textoGrupo({ productos: 6, unidades: 19 }), "6 productos · 19 unidades");
+  assert.deepEqual(conDiferencia([{ diferenciaApp: 0, diferenciaSap: 1 }, { diferenciaApp: 0, diferenciaSap: null }, { diferenciaApp: -2, diferenciaSap: null }])
+    .map((f) => f.diferenciaApp), [0, -2]);
+});

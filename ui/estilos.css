@@ -1216,3 +1216,8 @@ h2 {
 .pregunta-lote p { margin: 0 0 10px; }
 .pregunta-lote .lotes-caja { margin-top: 0; }
 .linea__lotes { grid-column: 1 / -1; display: flex; flex-wrap: wrap; align-items: center; gap: 8px 12px; font-size: 14px; font-weight: 600; color: var(--accion); }
+
+/* Auditoría de bodega: la diferencia de cada producto (el texto dice "Cumple", "−6" o "+2": el color no es la única señal). */
+.tabla-auditoria .auditoria--cumple { color: var(--ok-texto); font-weight: 700; }
+.tabla-auditoria .auditoria--falta { color: var(--error); font-weight: 700; }
+.tabla-auditoria .auditoria--sobra { color: var(--alerta-texto); font-weight: 700; }
