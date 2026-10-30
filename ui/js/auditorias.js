@@ -38,3 +38,19 @@ export function textoGrupo(g) {
 
 // Filas con alguna diferencia (contra la app o contra SAP).
 export const conDiferencia = (filas) => filas.filter((f) => (f.diferenciaApp ?? 0) !== 0 || (f.diferenciaSap ?? 0) !== 0);
+
+// Estado de una línea de la auditoría (escaneadas / esperadas), como en un pedido.
+export function estadoLineaAuditoria({ unidades: n, esperadas }) {
+  if (n === esperadas) return { tipo: "completa", texto: "Completa" };
+  if (n > esperadas) return { tipo: "sobra", texto: esperadas === 0 ? "No esperado" : `Sobran ${(n - esperadas).toLocaleString("es-HN")}` };
+  return { tipo: "falta", texto: `faltan ${(esperadas - n).toLocaleString("es-HN")}` };
+}
+
+// Lo que dice el lector después de una lectura: "Van 3 de 5", "Completo: 5 de 5", "Sobra: 6 de 5" o "No se esperaba".
+export function textoLecturaAuditoria(n, esperadas, fuente) {
+  if (!fuente) return `Van ${n.toLocaleString("es-HN")} de este producto`;
+  if (esperadas === 0) return `No se esperaba en este almacén · van ${n.toLocaleString("es-HN")}`;
+  if (n === esperadas) return `Completo: ${n.toLocaleString("es-HN")} de ${esperadas.toLocaleString("es-HN")}`;
+  if (n > esperadas) return `Sobra: van ${n.toLocaleString("es-HN")} de ${esperadas.toLocaleString("es-HN")}`;
+  return `Van ${n.toLocaleString("es-HN")} de ${esperadas.toLocaleString("es-HN")}`;
+}

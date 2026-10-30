@@ -742,3 +742,15 @@ test("auditoría: nombres de almacenes, avance y diferencias", async () => {
   assert.deepEqual(conDiferencia([{ diferenciaApp: 0, diferenciaSap: 1 }, { diferenciaApp: 0, diferenciaSap: null }, { diferenciaApp: -2, diferenciaSap: null }])
     .map((f) => f.diferenciaApp), [0, -2]);
 });
+
+test("auditoría: líneas como un pedido (escaneadas / esperadas)", async () => {
+  const { estadoLineaAuditoria, textoLecturaAuditoria } = await import("../ui/js/auditorias.js");
+  assert.deepEqual([{ unidades: 5, esperadas: 5 }, { unidades: 6, esperadas: 5 }, { unidades: 2, esperadas: 0 }, { unidades: 3, esperadas: 5 }]
+    .map(estadoLineaAuditoria), [{ tipo: "completa", texto: "Completa" }, { tipo: "sobra", texto: "Sobran 1" },
+    { tipo: "sobra", texto: "No esperado" }, { tipo: "falta", texto: "faltan 2" }]);
+  assert.equal(textoLecturaAuditoria(3, 5, "app"), "Van 3 de 5");
+  assert.equal(textoLecturaAuditoria(5, 5, "sap"), "Completo: 5 de 5");
+  assert.equal(textoLecturaAuditoria(6, 5, "app"), "Sobra: van 6 de 5");
+  assert.equal(textoLecturaAuditoria(1, 0, "app"), "No se esperaba en este almacén · van 1");
+  assert.equal(textoLecturaAuditoria(4, 0, null), "Van 4 de este producto");
+});
