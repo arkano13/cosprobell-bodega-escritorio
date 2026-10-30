@@ -12,7 +12,7 @@ import { conSigno, destacadosCuadre, nombreArchivoCuadre, notaCuadre, porcentaje
 import { REPORTES, crearReportesBodega } from "./reportes-bodega.js";
 import { crearOperacion } from "./operaciones.js";
 import { barras } from "./code128.js";
-import { conDiferencia, descripcionAlmacen, nombreAlmacen, textoAvance, textoComparacion, textoDiferencia, textoGrupo } from "./auditorias.js";
+import { conDiferencia, descripcionAlmacen, estadoLineaAuditoria, nombreAlmacen, textoLecturaAuditoria, textoAvance, textoComparacion, textoDiferencia, textoGrupo } from "./auditorias.js";
 
 // ---------------------------------------------------------------------------
 // Utilidades
@@ -2709,7 +2709,7 @@ async function vistaAuditorias() {
     if (a.enCurso) return vistaAuditoria(a.enCurso.id);
     if (!esSupervisor()) return informar({ titulo: "No hay una auditoría en curso", texto: `La auditoría de ${nombreAlmacen(a)} la inicia el supervisor. Después te unís para escanear.` });
     if (!(await confirmar({ titulo: `¿Auditar ${nombreAlmacen(a)}?`, aceptar: "Iniciar auditoría", texto: [
-      "Se escanea todo lo que hay, unidad por unidad. Mientras escanean no se muestra lo que dice el sistema.",
+      "Aparecen los productos que hay según el sistema; se escanea cada unidad para confirmarlos, como un pedido.",
       `${textoComparacion(a)} al terminar. Lo que no se escanee cuenta como 0.`] }))) return;
     try { vistaAuditoria((await api.iniciarAuditoria(a.almacen)).data.id); } catch (error) {
       if (error.status === 401) return mostrarError(error);
@@ -2729,7 +2729,7 @@ async function vistaAuditorias() {
   const propias = almacenes.filter((a) => a.tipo !== "otro"), otros = almacenes.filter((a) => a.tipo === "otro");
   mostrarInventario(volverA("Inventario", () => vistaInventario()),
     h("div", { class: "encabezado" }, h("div", {}, h("h1", {}, "Auditar bodega"),
-      h("p", { class: "encabezado__sub" }, "Se escanea todo lo que hay, unidad por unidad, sin lotes, vencimientos ni códigos de caja. Al terminar se compara con lo que dice el sistema."))),
+      h("p", { class: "encabezado__sub" }, "Aparecen los productos que hay según el sistema y se confirman escaneando cada unidad, sin lotes, vencimientos ni códigos de caja."))),
     h("ul", { class: "pedidos" }, propias.map(tarjeta)),
     otros.length > 0 && [h("h2", { class: "titulo-seccion" }, "Otros almacenes"),
       h("p", { class: "suave" }, "La app no los lleva: se comparan solo con SAP, si el puente manda sus existencias."),
@@ -2747,8 +2747,11 @@ async function vistaAuditoria(id) {
   let a;
   try { a = (await api.auditoria(id)).data; } catch (error) { return mostrarError(error, () => vistaAuditoria(id)); }
   if (a.estado !== "en_curso") return esSupervisor() && a.estado === "terminada" ? vistaResultadoAuditoria(id) : vistaAuditorias();
-  // Lo escaneado: productos (el último leído arriba) y el total. Se actualiza con cada lectura y con lo que escanean los demás.
-  let productos = a.productos, total = a.unidades, ultimo = null;
+  // Como un pedido: cada producto con lo escaneado y lo que se espera (en las bodegas de la app, lo que dice la app; en las
+  // demás, SAP). Se actualiza con cada lectura y con lo que escanean los demás.
+  const porNombre = (x, y) => (x.itemName ?? x.itemCode).localeCompare(y.itemName ?? y.itemCode, "es");
+  let productos = [...a.productos].sort(porNombre), total = a.unidades, ultimo = null;
+  const esperadas = () => productos.reduce((t, p) => t + p.esperadas, 0);
   const lista = h("ul", { class: "lineas" });
   const resumen = h("div", { class: "fila fila--entre resumen" });
   const resultado = h("div", { class: "resultado", role: "status", "aria-live": "assertive" });
@@ -2759,16 +2762,27 @@ async function vistaAuditoria(id) {
       h("div", { class: "resultado__texto" }, h("span", { class: "resultado__titulo" }, titulo), detalle && h("small", {}, detalle)));
   };
   const pintarLista = () => {
-    poner(resumen, h("strong", {}, textoAvance(total, productos.length)), h("span", { class: "suave" }, "Lo que dice el sistema se ve al terminar"));
-    lista.replaceChildren(...productos.map((p) => h("li", { class: `linea${p.itemCode === ultimo ? " linea--reciente" : ""}` },
+    const completos = productos.filter((p) => p.unidades === p.esperadas).length;
+    poner(resumen, h("strong", {}, a.fuente ? `${numero(total)} de ${unidadesTexto(esperadas())}` : textoAvance(total, productos.length)),
+      h("span", { class: "suave" }, a.fuente ? `${numero(completos)} de ${numero(productos.length)} productos completos` : "SAP no manda las existencias de este almacén"));
+    lista.replaceChildren(...productos.map((p) => {
+      const estado = estadoLineaAuditoria(p);
+      return h("li", { class: `linea${estado.tipo === "completa" ? " linea--completa" : estado.tipo === "sobra" ? " linea--sobra" : ""}${p.itemCode === ultimo ? " linea--reciente" : ""}`,
+        "data-item": p.itemCode },
       h("div", { class: "linea__nombre" }, p.itemName ?? p.itemCode), h("div", { class: "linea__detalle" }, h("span", { class: "codigo" }, p.itemCode)),
-      h("div", { class: "linea__cantidad" }, numero(p.unidades), h("span", { class: "linea__total" }, p.unidades === 1 ? " escaneada" : " escaneadas")))));
-    if (!productos.length) lista.replaceChildren(h("li", { class: "suave" }, "Todavía no se escaneó nada."));
+      h("div", { class: "linea__cantidad" }, numero(p.unidades), h("span", { class: "linea__total" }, ` / ${numero(p.esperadas)}`),
+        estado.tipo === "completa" ? h("span", { class: "insignia insignia--ok" }, icono("completa"), estado.texto)
+          : estado.tipo === "sobra" ? h("span", { class: "insignia insignia--alerta" }, icono("alerta"), estado.texto) : h("small", {}, estado.texto)));
+    }));
+    if (!productos.length) lista.replaceChildren(h("li", { class: "suave" }, "El sistema no tiene productos en este almacén. Escaneá lo que haya."));
+    lista.querySelector(".linea--reciente")?.scrollIntoView({ block: "nearest" });
   };
   const actualizarProducto = (d) => {
     total = d.unidades; ultimo = d.itemCode;
-    productos = [{ itemCode: d.itemCode, itemName: d.itemName, unidades: d.unidadesProducto }, ...productos.filter((p) => p.itemCode !== d.itemCode)]
-      .filter((p) => p.unidades > 0);
+    const linea = productos.find((p) => p.itemCode === d.itemCode);
+    if (linea) linea.unidades = d.unidadesProducto;
+    else productos = [...productos, { itemCode: d.itemCode, itemName: d.itemName, unidades: d.unidadesProducto, esperadas: 0 }].sort(porNombre);
+    productos = productos.filter((p) => p.unidades > 0 || p.esperadas > 0);
     pintarLista();
   };
   const cola = crearColaLecturas({
@@ -2779,7 +2793,8 @@ async function vistaAuditoria(id) {
       if (e.tipo === "aceptada") {
         const d = e.respuesta.data;
         actualizarProducto(d);
-        pintarResultado("ok", d.itemName, `Van ${numero(d.unidadesProducto)} de este producto`);
+        const linea = productos.find((p) => p.itemCode === d.itemCode);
+        pintarResultado("ok", d.itemName, textoLecturaAuditoria(d.unidadesProducto, linea?.esperadas ?? 0, a.fuente));
         desconexion.replaceChildren();
       } else if (e.tipo === "rechazada") {
         if (e.error?.codigo === "AUDITORIA_CERRADA") return vistaAuditoria(id);
@@ -2806,7 +2821,7 @@ async function vistaAuditoria(id) {
   const terminar = async () => {
     if (cola.pendientes) return informar({ titulo: "Quedan lecturas por enviar", texto: "Esperá a que se envíen todas antes de terminar." });
     if (!(await confirmar({ titulo: "¿Terminar la auditoría?", aceptar: "Terminar y ver el resultado", texto: [
-      `${textoAvance(total, productos.length)} escaneadas.`, "Lo que no se escaneó cuenta como 0. Después de terminar nadie puede seguir escaneando."] }))) return;
+      a.fuente ? `${numero(total)} de ${unidadesTexto(esperadas())} escaneadas.` : `${textoAvance(total, productos.length)} escaneadas.`, "Lo que no se escaneó cuenta como 0. Después de terminar nadie puede seguir escaneando."] }))) return;
     try { await api.terminarAuditoria(id); guardado.borrar(`auditoria.${id}`); vistaResultadoAuditoria(id); } catch (error) {
       if (error.status === 401) return mostrarError(error);
       informar({ titulo: "No se pudo terminar", texto: textoFalla(error) });
@@ -2828,7 +2843,7 @@ async function vistaAuditoria(id) {
       const d = (await api.auditoria(id)).data;
       if (!vigente) return;
       if (d.estado !== "en_curso") return vistaAuditoria(id);
-      productos = d.productos; total = d.unidades; pintarLista();
+      productos = [...d.productos].sort(porNombre); total = d.unidades; pintarLista();
     } catch { /* sin conexión: se intenta en el próximo */ }
   }, 15000);
   limpiezas.push(() => { vigente = false; clearInterval(refresco); });
@@ -2839,7 +2854,7 @@ async function vistaAuditoria(id) {
     h("div", { class: "encabezado__sub" }, `Iniciada por ${a.iniciadaPor ?? "el supervisor"} · ${fechaHora(a.iniciadaEn)}${personas}`))),
   h("div", { class: "escaneo-layout" },
     h("section", { class: "escaneo" }, lector.seccion.firstChild, lector.seccion.querySelector("form"), resultado, resumen, desconexion),
-    h("section", {}, h("h2", {}, "Escaneado"), lista,
+    h("section", {}, h("h2", {}, "Productos"), lista,
       h("div", { class: "acciones" }, quitar,
         esSupervisor() && boton("boton--principal", "finalizar", "Terminar auditoría", { onclick: terminar }),
         boton("", "volver", "Salir (la auditoría sigue)", { onclick: () => vistaAuditorias() }),

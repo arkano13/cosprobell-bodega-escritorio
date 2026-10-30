@@ -1221,3 +1221,5 @@ h2 {
 .tabla-auditoria .auditoria--cumple { color: var(--ok-texto); font-weight: 700; }
 .tabla-auditoria .auditoria--falta { color: var(--error); font-weight: 700; }
 .tabla-auditoria .auditoria--sobra { color: var(--alerta-texto); font-weight: 700; }
+.linea--sobra { background: var(--alerta-fondo); border-color: var(--alerta-borde); }
+.linea--sobra::before { background: var(--alerta); }
