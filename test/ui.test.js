@@ -754,3 +754,9 @@ test("auditoría: líneas como un pedido (escaneadas / esperadas)", async () => 
   assert.equal(textoLecturaAuditoria(1, 0, "app"), "No se esperaba en este almacén · van 1");
   assert.equal(textoLecturaAuditoria(4, 0, null), "Van 4 de este producto");
 });
+
+test("auditoría: texto de una corrección del supervisor", async () => {
+  const { textoCorreccion } = await import("../ui/js/auditorias.js");
+  assert.equal(textoCorreccion({ antes: 2, despues: 5, motivo: "Faltó un estante", hechoPor: "Admin" }), "De 2 a 5 unidades · Faltó un estante · Admin");
+  assert.equal(textoCorreccion({ antes: 0, despues: 1, motivo: null, hechoPor: null }), "De 0 a 1 unidad");
+});

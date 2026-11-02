@@ -1221,5 +1221,7 @@ h2 {
 .tabla-auditoria .auditoria--cumple { color: var(--ok-texto); font-weight: 700; }
 .tabla-auditoria .auditoria--falta { color: var(--error); font-weight: 700; }
 .tabla-auditoria .auditoria--sobra { color: var(--alerta-texto); font-weight: 700; }
+.tabla-auditoria .auditoria__original { font-size: 12px; font-weight: 600; color: var(--accion); white-space: nowrap; }
+.auditoria-correcciones__lista { margin: 0; padding-left: 20px; line-height: 1.6; }
 .linea--sobra { background: var(--alerta-fondo); border-color: var(--alerta-borde); }
 .linea--sobra::before { background: var(--alerta); }
