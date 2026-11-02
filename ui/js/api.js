@@ -107,6 +107,7 @@ export function crearApi({ token, base = "", fetchImpl = (...args) => globalThis
     terminarAuditoria: (id) => pedir("POST", `/inventario/auditorias/${id}/terminar`, {}),
     anularAuditoria: (id) => pedir("POST", `/inventario/auditorias/${id}/anular`, {}),
     resultadoAuditoria: (id) => pedir("GET", `/inventario/auditorias/${id}/resultado`),
+    corregirAuditoria: (id, cuerpo) => pedir("POST", `/inventario/auditorias/${id}/correcciones`, cuerpo),
     cerrarLineaTraslado: (docEntry, lineNum) => pedir("POST", `/inventario/traslados/${docEntry}/lineas/${lineNum}/cerrar`, {}),
     conteoInicial: ({ buscar = "", pagina = 0 } = {}) => pedir("GET", `/inventario/pendientes/inicial?${new URLSearchParams({
       pagina: String(pagina), limit: "50", ...(buscar ? { buscar } : {}) })}`),

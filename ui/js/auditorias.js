@@ -54,3 +54,11 @@ export function textoLecturaAuditoria(n, esperadas, fuente) {
   if (n > esperadas) return `Sobra: van ${n.toLocaleString("es-HN")} de ${esperadas.toLocaleString("es-HN")}`;
   return `Van ${n.toLocaleString("es-HN")} de ${esperadas.toLocaleString("es-HN")}`;
 }
+
+// Una corrección del supervisor: "De 2 a 5 unidades · Faltó un estante · Admin".
+export function textoCorreccion(c) {
+  const partes = [`De ${c.antes.toLocaleString("es-HN")} a ${unidades(c.despues)}`];
+  if (c.motivo) partes.push(c.motivo);
+  if (c.hechoPor) partes.push(c.hechoPor);
+  return partes.join(" · ");
+}

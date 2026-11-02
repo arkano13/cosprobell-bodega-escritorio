@@ -12,7 +12,7 @@ import { conSigno, destacadosCuadre, nombreArchivoCuadre, notaCuadre, porcentaje
 import { REPORTES, crearReportesBodega } from "./reportes-bodega.js";
 import { crearOperacion } from "./operaciones.js";
 import { barras } from "./code128.js";
-import { conDiferencia, descripcionAlmacen, estadoLineaAuditoria, nombreAlmacen, textoLecturaAuditoria, textoAvance, textoComparacion, textoDiferencia, textoGrupo } from "./auditorias.js";
+import { conDiferencia, descripcionAlmacen, estadoLineaAuditoria, nombreAlmacen, textoCorreccion, textoLecturaAuditoria, textoAvance, textoComparacion, textoDiferencia, textoGrupo } from "./auditorias.js";
 
 // ---------------------------------------------------------------------------
 // Utilidades
@@ -2863,25 +2863,56 @@ async function vistaAuditoria(id) {
   lector.entrada.focus();
 }
 
-async function vistaResultadoAuditoria(id) {
+async function vistaResultadoAuditoria(id, { mensaje = null, soloDiferencias = false } = {}) {
   mostrarInventario(cargando("Cargando resultado…"));
   let r;
   try { r = (await api.resultadoAuditoria(id)).data; } catch (error) { return mostrarError(error, () => vistaResultadoAuditoria(id)); }
-  let soloDiferencias = false;
+  const correcciones = r.correcciones ?? [];
+  // Corregir lo escaneado de un producto (si se equivocaron al escanear): la diferencia se recalcula con los mismos
+  // números de la app y de SAP que había al terminar, y la corrección queda anotada.
+  async function corregir(fila) {
+    const datos = await pedirDatos({ titulo: fila ? `Corregir ${fila.itemName}` : "Agregar un producto",
+      texto: fila ? `Se escanearon ${unidadesTexto(fila.original ?? fila.escaneado)}${fila.original !== undefined ? ` (ahora dice ${numero(fila.escaneado)})` : ""}. Escribí cuántas hay de verdad.`
+        : "Un producto que no se escaneó: escaneá la etiqueta de la unidad o escribí el código del producto.",
+      aceptar: "Guardar",
+      campos: [...(fila ? [] : [{ nombre: "codigo", etiqueta: "Código de barras o código del producto", maxlength: 64 }]),
+        { nombre: "unidades", etiqueta: "Unidades que hay", inputmode: "numeric", maxlength: 7 },
+        { nombre: "motivo", etiqueta: "Motivo (opcional)", maxlength: 200, ayuda: "Por ejemplo: se escaneó dos veces, faltó un estante." }],
+      validar: (d) => (!fila && !d.codigo ? "Escaneá o escribí el producto."
+        : /^\d+$/.test(d.unidades) ? null : "Escribí un número entero, sin puntos ni comas.") });
+    if (!datos) return;
+    try {
+      const { data } = await api.corregirAuditoria(id, { ...(fila ? { itemCode: fila.itemCode } : { codigo: datos.codigo }),
+        escaneado: Number(datos.unidades), ...(datos.motivo ? { motivo: datos.motivo } : {}) });
+      const nueva = data.filas.find((f) => f.itemCode === fila?.itemCode) ?? data.correcciones.at(-1);
+      vistaResultadoAuditoria(id, { soloDiferencias, mensaje: `Corregido: ${fila?.itemName ?? nueva?.itemName ?? "el producto"} quedó con ${unidadesTexto(Number(datos.unidades))}.` });
+    } catch (error) {
+      if (error.status === 401) return mostrarError(error);
+      informar({ titulo: "No se guardó la corrección", texto: textoFalla(error) });
+    }
+  }
   const conApp = r.resumen.contraApp !== null, conSap = r.resumen.contraSap !== null;
   const contra = conApp ? r.resumen.contraApp : r.resumen.contraSap;
-  const sub = `${fechaHora(r.iniciadaEn)} a ${horaCorta(r.terminadaEn)} · ${r.personas.length} ${r.personas.length === 1 ? "persona" : "personas"} · ${numero(r.resumen.escaneado)} unidades escaneadas`;
+  const sub = `${fechaHora(r.iniciadaEn)} a ${horaCorta(r.terminadaEn)} · ${r.personas.length} ${r.personas.length === 1 ? "persona" : "personas"} · ${numero(r.resumen.escaneado)} unidades escaneadas${correcciones.length ? ` · ${correcciones.length === 1 ? "1 corrección" : `${correcciones.length} correcciones`}` : ""}`;
   const celda = (d) => {
     const texto = textoDiferencia(d);
     return h("td", { class: `tabla__numero ${d === 0 ? "auditoria--cumple" : d < 0 ? "auditoria--falta" : "auditoria--sobra"}` }, texto);
   };
-  const tabla = (filas) => h("div", { class: "tabla-envoltura" }, h("table", { class: "tabla tabla-auditoria" },
+  // En pantalla, cada fila tiene "Corregir"; en el PDF, no.
+  const tabla = (filas, { editar = false } = {}) => h("div", { class: "tabla-envoltura" }, h("table", { class: "tabla tabla-auditoria" },
     h("thead", {}, h("tr", {}, h("th", { scope: "col" }, "Producto"), h("th", { scope: "col", class: "tabla__numero" }, "Escaneado"),
       conApp && h("th", { scope: "col", class: "tabla__numero" }, "App"), conSap && h("th", { scope: "col", class: "tabla__numero" }, "SAP"),
-      conApp && h("th", { scope: "col", class: "tabla__numero" }, "Contra la app"), conSap && h("th", { scope: "col", class: "tabla__numero" }, "Contra SAP"))),
+      conApp && h("th", { scope: "col", class: "tabla__numero" }, "Contra la app"), conSap && h("th", { scope: "col", class: "tabla__numero" }, "Contra SAP"),
+      editar && h("th", { scope: "col" }, h("span", { class: "visualmente-oculto" }, "Corregir")))),
     h("tbody", {}, filas.map((f) => h("tr", {}, h("th", { scope: "row" }, f.itemName, h("div", { class: "suave codigo" }, f.itemCode)),
-      h("td", { class: "tabla__numero" }, numero(f.escaneado)), conApp && h("td", { class: "tabla__numero" }, numero(f.app)),
-      conSap && h("td", { class: "tabla__numero" }, numero(f.sap)), conApp && celda(f.diferenciaApp), conSap && celda(f.diferenciaSap))))));
+      h("td", { class: "tabla__numero" }, numero(f.escaneado),
+        f.original !== undefined && h("div", { class: "auditoria__original" }, `corregido · se escanearon ${numero(f.original)}`)),
+      conApp && h("td", { class: "tabla__numero" }, numero(f.app)),
+      conSap && h("td", { class: "tabla__numero" }, numero(f.sap)), conApp && celda(f.diferenciaApp), conSap && celda(f.diferenciaSap),
+      editar && h("td", {}, boton("boton--chico", "contar", "Corregir", { onclick: () => corregir(f) })))))));
+  const listaCorrecciones = () => correcciones.length ? h("section", { class: "tarjeta auditoria-correcciones" },
+    h("h2", {}, "Correcciones"),
+    h("ul", { class: "auditoria-correcciones__lista" }, correcciones.map((c) => h("li", {}, h("strong", {}, c.itemName), ` · ${textoCorreccion(c)} · ${fechaHora(c.creadoEn)}`)))) : null;
   const cifras = contra ? h("div", { class: "cifras" },
     h("div", { class: "cifra" }, h("strong", {}, numero(contra.cumplen)), h("span", {}, "cumplen")),
     h("div", { class: "cifra" }, h("strong", {}, numero(contra.faltan.productos)), h("span", {}, `faltan · ${textoGrupo(contra.faltan).split(" · ")[1] ?? "0 unidades"}`)),
@@ -2895,11 +2926,11 @@ async function vistaResultadoAuditoria(id) {
   const pintar = () => {
     const filas = soloDiferencias ? conDiferencia(r.filas) : r.filas;
     filtro.lastChild.textContent = soloDiferencias ? "Ver todo" : "Ver solo diferencias";
-    poner(zonaTabla, filas.length ? tabla(filas) : aviso("ok", soloDiferencias ? "No hay diferencias: todo cumple." : "No hay productos en este almacén."));
+    poner(zonaTabla, filas.length ? tabla(filas, { editar: true }) : aviso("ok", soloDiferencias ? "No hay diferencias: todo cumple." : "No hay productos en este almacén."));
   };
   const descargar = boton("boton--principal", "impresora", "Descargar PDF", { onclick: async () => {
     descargar.disabled = true;
-    const res = await guardarReportePdf({ titulo: `Auditoría · ${r.almacen}`, sub, nodos: [cifras?.cloneNode(true), h("p", {}, nota), tabla(r.filas)],
+    const res = await guardarReportePdf({ titulo: `Auditoría · ${r.almacen}`, sub, nodos: [cifras?.cloneNode(true), h("p", {}, nota), tabla(r.filas), listaCorrecciones()],
       nombre: `Auditoria-${r.almacen}-${String(r.terminadaEn).slice(0, 10)}.pdf`, pie: `Bodega Cosprobell · Auditoría ${r.almacen} · ${fechaHora(r.terminadaEn)}` });
     descargar.disabled = false;
     if (res.ok) informar({ titulo: "PDF guardado", texto: res.archivo });
@@ -2911,7 +2942,9 @@ async function vistaResultadoAuditoria(id) {
   mostrarInventario(volverA("Auditar bodega", () => vistaAuditorias()),
     h("div", { class: "encabezado" }, h("div", {}, h("h1", {}, `Resultado · ${r.almacen}`), h("div", { class: "encabezado__sub" }, sub))),
     cifras && h("section", { class: "tarjeta" }, h("h2", {}, conApp ? "Contra la app" : "Contra SAP"), cifras),
-    aviso("info", nota), zonaTabla, h("div", { class: "fila" }, descargar, filtro));
+    mensaje && aviso("ok", mensaje, { role: "status" }),
+    aviso("info", nota), zonaTabla, h("div", { class: "fila" }, descargar, filtro,
+      boton("", "mas", "Agregar un producto", { onclick: () => corregir(null) })), listaCorrecciones());
 }
 
 async function vistaCaja(codigo, mensaje = null) {
