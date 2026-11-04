@@ -10,6 +10,7 @@ import { elegirServidor } from "./servidor.js";
 import { crearIngreso, datosIngresoValidos, leerClaveIngreso } from "./ingreso.js";
 import { iniciarActualizaciones } from "./actualizaciones.js";
 import { guardarPdf } from "./pdf.js";
+import { guardarExcel } from "./excel.js";
 
 const RAIZ = path.join(path.dirname(fileURLToPath(import.meta.url)), "..");
 const UI = path.join(RAIZ, "ui");
@@ -104,6 +105,22 @@ async function iniciar() {
         return r.canceled || !r.filePath ? null : r.filePath;
       },
       escribir: (ruta, pdf) => writeFile(ruta, pdf),
+      abrir: async (ruta) => { if (!prueba) await shell.openPath(ruta); },
+    });
+  });
+  // Reportes en Excel: la página manda solo los datos de la hoja (se validan en excel.js). Como el PDF.
+  ipcMain.handle("reporte:excel", (evento, datos) => {
+    validarRemitente(evento);
+    const prueba = !app.isPackaged ? process.env.BODEGA_CARPETA_REPORTES : null;
+    const duena = BrowserWindow.fromWebContents(evento.sender);
+    return guardarExcel({
+      datos, carpeta: prueba || app.getPath("documents"),
+      elegirArchivo: async (sugerida) => {
+        if (prueba) return sugerida;
+        const r = await dialog.showSaveDialog(duena, { title: "Guardar en Excel", defaultPath: sugerida, filters: [{ name: "Excel", extensions: ["xlsx"] }] });
+        return r.canceled || !r.filePath ? null : r.filePath;
+      },
+      escribir: (ruta, xlsx) => writeFile(ruta, xlsx),
       abrir: async (ruta) => { if (!prueba) await shell.openPath(ruta); },
     });
   });

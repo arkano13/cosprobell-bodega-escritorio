@@ -13,6 +13,7 @@ import { REPORTES, crearReportesBodega } from "./reportes-bodega.js";
 import { crearOperacion } from "./operaciones.js";
 import { barras } from "./code128.js";
 import { conDiferencia, descripcionAlmacen, estadoLineaAuditoria, nombreAlmacen, textoCorreccion, textoLecturaAuditoria, textoAvance, textoComparacion, textoDiferencia, textoGrupo } from "./auditorias.js";
+import { hojaConteo, nombreArchivoConteo, textoTotalConteo } from "./conteos.js";
 
 // ---------------------------------------------------------------------------
 // Utilidades
@@ -1847,7 +1848,8 @@ async function vistaInventario() {
       accion("contar", "Contar", () => vistaConteo()),
       accion("caja", "Recibir", () => vistaBuscar({ proposito: "recibir" })),
       accion("lista", "Productos", () => vistaProductos()),
-      accion("buscar", "Auditar", () => vistaAuditorias())),
+      accion("buscar", "Auditar", () => vistaAuditorias()),
+      accion("escaner", "Conteo con nombre", () => vistaConteosLibres())),
     h("div", { class: "bodegas" },
       tarjetaBodega("grande", "caja", [cifra(r.grande.cajas, "cajas"), cifra(r.grande.abiertas, "abiertas"), cifra(r.grande.productos, "productos"),
         cifra(r.grande.unidades, "unidades")]),
@@ -2945,6 +2947,173 @@ async function vistaResultadoAuditoria(id, { mensaje = null, soloDiferencias = f
     mensaje && aviso("ok", mensaje, { role: "status" }),
     aviso("info", nota), zonaTabla, h("div", { class: "fila" }, descargar, filtro,
       boton("", "mas", "Agregar un producto", { onclick: () => corregir(null) })), listaCorrecciones());
+}
+
+// Conteos con nombre: cualquier operador le pone un nombre ("Devolución cliente X", "Estante 4"), escanea unidad por unidad
+// lo que tiene delante y al finalizar sale la lista de productos con sus cantidades, en PDF y en Excel. Solo cuenta: no
+// compara con existencias ni mueve inventario. Cada operador ve los suyos; el supervisor, todos.
+async function vistaConteosLibres() {
+  mostrarInventario(cargando("Cargando conteos…"));
+  let r;
+  try { r = (await api.conteosLibres()).data; } catch (error) { return mostrarError(error, () => vistaConteosLibres()); }
+  const nuevo = async () => {
+    const datos = await pedirDatos({ titulo: "Nuevo conteo", aceptar: "Empezar a contar",
+      texto: "Ponele un nombre para reconocerlo en el documento.",
+      campos: [{ nombre: "nombre", etiqueta: "Nombre del conteo", maxlength: 80, ayuda: "Por ejemplo: Devolución cliente X, Estante 4, Llegada proveedor." }],
+      validar: (d) => (d.nombre ? null : "Escribí un nombre.") });
+    if (!datos) return;
+    try { vistaConteoLibre((await api.iniciarConteoLibre(datos.nombre)).data.id); } catch (error) {
+      if (error.status === 401) return mostrarError(error);
+      informar({ titulo: "No se pudo empezar", texto: textoFalla(error) });
+    }
+  };
+  const quien = (c) => (esSupervisor() && c.iniciadoPor ? ` · ${c.iniciadoPor}` : "");
+  const tarjeta = (c) => h("li", {}, h("button", { class: "pedido", type: "button", onclick: () => vistaConteoLibre(c.id) },
+    h("div", { class: "pedido__cabeza" }, h("div", { class: "pedido__numero" }, c.nombre), insignia("alerta", null, "En curso"), icono("siguiente", "icono pedido__flecha")),
+    h("div", { class: "pedido__cuerpo" }, h("div", { class: "pedido__meta" }, `Empezado ${fechaHora(c.iniciadoEn)}${quien(c)}`),
+      h("div", { class: "pedido__meta" }, textoTotalConteo(c)))));
+  mostrarInventario(volverA("Inventario", () => vistaInventario()),
+    h("div", { class: "encabezado" }, h("div", {}, h("h1", {}, "Conteo con nombre"),
+      h("p", { class: "encabezado__sub" }, "Escaneá unidad por unidad lo que tenés delante: al finalizar sale la lista con las cantidades en PDF y Excel.")),
+    boton("boton--principal", "mas", "Nuevo conteo", { onclick: nuevo })),
+    r.enCurso.length ? [h("h2", { class: "titulo-seccion" }, "En curso"), h("ul", { class: "pedidos" }, r.enCurso.map(tarjeta))]
+      : aviso("info", "No hay conteos en curso. Tocá \"Nuevo conteo\" para empezar uno."),
+    r.terminados.length > 0 && [h("h2", { class: "titulo-seccion" }, "Finalizados"),
+      h("ul", { class: "filas" }, r.terminados.map((c) => filaAdmin({ nombre: c.nombre,
+        detalle: [`${fechaHora(c.terminadoEn)}${quien(c)} · ${textoTotalConteo(c)}`],
+        acciones: [boton("", "siguiente", "Ver", { onclick: () => vistaResultadoConteo(c.id) })] })))]);
+}
+
+async function vistaConteoLibre(id) {
+  mostrarInventario(cargando("Cargando conteo…"));
+  let c;
+  try { c = (await api.conteoLibre(id)).data; } catch (error) { return mostrarError(error, () => vistaConteoLibre(id)); }
+  if (c.estado === "terminado") return vistaResultadoConteo(id);
+  if (c.estado !== "en_curso") return vistaConteosLibres();
+  let productos = c.productos, total = c.unidades, ultimo = null;
+  const lista = h("ul", { class: "lineas" });
+  const resumen = h("div", { class: "fila fila--entre resumen" });
+  const resultado = h("div", { class: "resultado", role: "status", "aria-live": "assertive" });
+  const desconexion = h("div", {});
+  const pintarResultado = (tipo, titulo, detalle) => {
+    resultado.className = `resultado${tipo ? ` resultado--${tipo === "ok" ? "ok" : "error"}` : ""}`;
+    resultado.replaceChildren(tipo ? icono(tipo === "ok" ? "aceptada" : "rechazada") : h("span", { class: "resultado__laser" }, icono("escaner")),
+      h("div", { class: "resultado__texto" }, h("span", { class: "resultado__titulo" }, titulo), detalle && h("small", {}, detalle)));
+  };
+  // Lo último escaneado arriba, como lo devuelve el servidor.
+  const pintarLista = () => {
+    poner(resumen, h("strong", {}, unidadesTexto(total)), h("span", { class: "suave" }, `${numero(productos.length)} ${productos.length === 1 ? "producto" : "productos"}`));
+    lista.replaceChildren(...productos.map((p) => h("li", { class: `linea${p.itemCode === ultimo ? " linea--reciente" : ""}`, "data-item": p.itemCode },
+      h("div", { class: "linea__nombre" }, p.itemName ?? p.itemCode), h("div", { class: "linea__detalle" }, h("span", { class: "codigo" }, p.itemCode)),
+      h("div", { class: "linea__cantidad" }, numero(p.unidades)))));
+    if (!productos.length) lista.replaceChildren(h("li", { class: "suave" }, "Todavía no escaneaste nada."));
+  };
+  const actualizarProducto = (d) => {
+    total = d.unidades; ultimo = d.itemCode;
+    const linea = productos.find((p) => p.itemCode === d.itemCode);
+    const resto = productos.filter((p) => p.itemCode !== d.itemCode);
+    productos = d.unidadesProducto > 0 ? [{ itemCode: d.itemCode, itemName: d.itemName ?? linea?.itemName, unidades: d.unidadesProducto }, ...resto] : resto;
+    pintarLista();
+  };
+  const cola = crearColaLecturas({
+    enviar: (l) => api.leerConteoLibre(id, l.codigo, l.operacionId),
+    guardar: (pendientes) => guardado.escribir(`conteo-libre.${id}`, pendientes),
+    pendientes: guardado.leer(`conteo-libre.${id}`) ?? [],
+    alCambiar: (e) => {
+      if (e.tipo === "aceptada") {
+        const d = e.respuesta.data;
+        actualizarProducto(d);
+        pintarResultado("ok", d.itemName, `Van ${numero(d.unidadesProducto)} de este producto`);
+        desconexion.replaceChildren();
+      } else if (e.tipo === "rechazada") {
+        if (e.error?.codigo === "CONTEO_CERRADO") return vistaConteoLibre(id);
+        pintarResultado("error", `No se contó: ${e.lectura.codigo}`, e.error?.mensaje ?? "Error al leer");
+      } else if (e.tipo === "detenida") {
+        if (e.error?.status === 401) return mostrarError(e.error);
+        poner(desconexion, aviso("alerta", `Sin conexión. ${e.enCola} ${e.enCola === 1 ? "lectura pendiente" : "lecturas pendientes"}: se envían al reconectar, sin contarse dos veces.`, {},
+          boton("", "actualizar", "Reintentar", { onclick: () => cola.reanudar() })));
+      }
+    },
+  });
+  const lector = campoLector({ placeholder: "Escaneá cada unidad", alLeer: (codigo) => cola.agregar(codigo) });
+  const quitar = boton("", "borrar", "Quitar la última lectura", { onclick: async () => {
+    quitar.disabled = true;
+    try {
+      const d = (await api.quitarUltimaConteoLibre(id)).data;
+      actualizarProducto(d);
+      pintarResultado("ok", `Se quitó 1 de ${d.itemName}`, `Quedan ${numero(d.unidadesProducto)} de este producto`);
+    } catch (error) {
+      if (error.status === 401) return mostrarError(error);
+      pintarResultado("error", "No se pudo quitar", textoFalla(error));
+    } finally { quitar.disabled = false; lector.entrada.focus(); }
+  } });
+  const finalizar = async () => {
+    if (cola.pendientes) return informar({ titulo: "Quedan lecturas por enviar", texto: "Esperá a que se envíen todas antes de finalizar." });
+    if (!(await confirmar({ titulo: "¿Finalizar el conteo?", aceptar: "Finalizar y ver el documento",
+      texto: [`${unidadesTexto(total)} de ${numero(productos.length)} ${productos.length === 1 ? "producto" : "productos"}.`, "Después de finalizar no se puede seguir escaneando."] }))) return;
+    try { await api.terminarConteoLibre(id); guardado.borrar(`conteo-libre.${id}`); vistaResultadoConteo(id); } catch (error) {
+      if (error.status === 401) return mostrarError(error);
+      informar({ titulo: "No se pudo finalizar", texto: textoFalla(error) });
+    }
+  };
+  const descartar = async () => {
+    if (!(await confirmar({ titulo: "¿Descartar el conteo?", aceptar: "Descartar", peligro: true,
+      texto: "Se pierde todo lo escaneado y no queda documento." }))) return;
+    try { await api.anularConteoLibre(id); guardado.borrar(`conteo-libre.${id}`); vistaConteosLibres(); } catch (error) {
+      if (error.status === 401) return mostrarError(error);
+      informar({ titulo: "No se pudo descartar", texto: textoFalla(error) });
+    }
+  };
+  pintarResultado(null, "Escaneá cada unidad");
+  pintarLista();
+  mostrarInventario(volverA("Conteos", () => vistaConteosLibres()),
+    h("div", { class: "encabezado" }, h("div", {}, h("h1", {}, c.nombre),
+      h("div", { class: "encabezado__sub" }, `Conteo empezado por ${c.iniciadoPor ?? "la app"} · ${fechaHora(c.iniciadoEn)}`))),
+    h("div", { class: "escaneo-layout" },
+      h("section", { class: "escaneo" }, lector.seccion.firstChild, lector.seccion.querySelector("form"), resultado, resumen, desconexion),
+      h("section", {}, h("h2", {}, "Escaneado"), lista,
+        h("div", { class: "acciones" }, quitar,
+          boton("boton--principal", "finalizar", "Finalizar conteo", { onclick: finalizar }),
+          boton("", "volver", "Salir (el conteo sigue)", { onclick: () => vistaConteosLibres() }),
+          boton("boton--peligro", "borrar", "Descartar", { onclick: descartar })))));
+  cola.procesar();
+  lector.entrada.focus();
+}
+
+async function vistaResultadoConteo(id) {
+  mostrarInventario(cargando("Cargando conteo…"));
+  let c;
+  try { c = (await api.conteoLibre(id)).data; } catch (error) { return mostrarError(error, () => vistaResultadoConteo(id)); }
+  if (c.estado === "en_curso") return vistaConteoLibre(id);
+  const sub = `${c.iniciadoPor ?? "La app"} · ${fechaHora(c.iniciadoEn)} a ${horaCorta(c.terminadoEn)} · ${textoTotalConteo(c)}`;
+  const tabla = () => h("div", { class: "tabla-envoltura" }, h("table", { class: "tabla" },
+    h("thead", {}, h("tr", {}, h("th", { scope: "col" }, "Producto"), h("th", { scope: "col" }, "Código"), h("th", { scope: "col", class: "tabla__numero" }, "Unidades"))),
+    h("tbody", {}, c.productos.map((p) => h("tr", {}, h("th", { scope: "row" }, p.itemName ?? p.itemCode), h("td", { class: "codigo" }, p.itemCode),
+      h("td", { class: "tabla__numero" }, numero(p.unidades))))),
+    h("tfoot", {}, h("tr", {}, h("th", { scope: "row" }, "Total"), h("td", {}), h("td", { class: "tabla__numero" }, h("strong", {}, numero(c.unidades)))))));
+  const avisarGuardado = (res) => {
+    if (res.ok) informar({ titulo: "Guardado", texto: res.archivo });
+    else if (res.motivo === "ocupado") informar({ titulo: "No se pudo guardar", texto: "El archivo está abierto en otro programa. Cerralo o elegí otro nombre." });
+    else if (!res.cancelado) informar({ titulo: "No se pudo guardar", texto: "Probá de nuevo." });
+  };
+  const pdf = boton("boton--principal", "impresora", "Descargar PDF", { onclick: async () => {
+    pdf.disabled = true;
+    const res = await guardarReportePdf({ titulo: `Conteo · ${c.nombre}`, sub, nodos: [tabla()], nombre: nombreArchivoConteo(c, "pdf"),
+      pie: `Bodega Cosprobell · Conteo ${c.nombre} · ${fechaHora(c.terminadoEn)}` });
+    pdf.disabled = false; avisarGuardado(res);
+  } });
+  const excel = boton("", "lista", "Descargar Excel", { onclick: async () => {
+    excel.disabled = true;
+    let res;
+    try { res = await window.escritorio.guardarExcel(hojaConteo(c, sub)); } catch { res = { ok: false, motivo: "error" }; }
+    excel.disabled = false; avisarGuardado(res);
+  } });
+  if (!window.escritorio?.guardarPdf) pdf.hidden = true;
+  if (!window.escritorio?.guardarExcel) excel.hidden = true;
+  mostrarInventario(volverA("Conteos", () => vistaConteosLibres()),
+    h("div", { class: "encabezado" }, h("div", {}, h("h1", {}, `Conteo · ${c.nombre}`), h("div", { class: "encabezado__sub" }, sub))),
+    c.estado === "anulado" ? aviso("alerta", "Este conteo se descartó.")
+      : [c.productos.length ? tabla() : aviso("info", "No se escaneó nada en este conteo."), h("div", { class: "fila" }, pdf, excel)]);
 }
 
 async function vistaCaja(codigo, mensaje = null) {

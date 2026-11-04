@@ -760,3 +760,16 @@ test("auditoría: texto de una corrección del supervisor", async () => {
   assert.equal(textoCorreccion({ antes: 2, despues: 5, motivo: "Faltó un estante", hechoPor: "Admin" }), "De 2 a 5 unidades · Faltó un estante · Admin");
   assert.equal(textoCorreccion({ antes: 0, despues: 1, motivo: null, hechoPor: null }), "De 0 a 1 unidad");
 });
+
+test("conteo con nombre: textos, nombre de archivo y hoja de Excel", async () => {
+  const { hojaConteo, nombreArchivoConteo, textoTotalConteo } = await import("../ui/js/conteos.js");
+  const c = { id: 7, nombre: "Devolución cliente X / Ñandú", terminadoEn: "2026-11-04T16:30:00.000Z", unidades: 3,
+    productos: [{ itemCode: "P2", itemName: "Crema", unidades: 1 }, { itemCode: "P1", itemName: "Shampoo", unidades: 2 }] };
+  assert.equal(textoTotalConteo(c), "3 unidades · 2 productos");
+  assert.equal(textoTotalConteo({ unidades: 1, productos: 1 }), "1 unidad · 1 producto");
+  assert.equal(nombreArchivoConteo(c, "pdf"), "Conteo-Devolucion-cliente-X-Nandu-2026-11-04.pdf");
+  assert.equal(nombreArchivoConteo({ id: 9, nombre: "///", iniciadoEn: "2026-11-05T10:00:00Z" }, "xlsx"), "Conteo-9-2026-11-05.xlsx");
+  assert.deepEqual(hojaConteo(c, "Isidro"), { nombre: "Conteo-Devolucion-cliente-X-Nandu-2026-11-04.xlsx", hoja: "Conteo",
+    titulo: "Conteo · Devolución cliente X / Ñandú", sub: "Isidro", encabezados: ["Código", "Producto", "Unidades"],
+    filas: [["P2", "Crema", 1], ["P1", "Shampoo", 2]], total: ["", "Total", 3] });
+});

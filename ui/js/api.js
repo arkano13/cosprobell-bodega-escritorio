@@ -108,6 +108,13 @@ export function crearApi({ token, base = "", fetchImpl = (...args) => globalThis
     anularAuditoria: (id) => pedir("POST", `/inventario/auditorias/${id}/anular`, {}),
     resultadoAuditoria: (id) => pedir("GET", `/inventario/auditorias/${id}/resultado`),
     corregirAuditoria: (id, cuerpo) => pedir("POST", `/inventario/auditorias/${id}/correcciones`, cuerpo),
+    conteosLibres: () => pedir("GET", "/conteos?limit=30"),
+    iniciarConteoLibre: (nombre) => pedir("POST", "/conteos", { nombre }),
+    conteoLibre: (id) => pedir("GET", `/conteos/${id}`),
+    leerConteoLibre: (id, codigo, operacionId) => pedir("POST", `/conteos/${id}/lecturas`, { codigo, operacionId }),
+    quitarUltimaConteoLibre: (id) => pedir("POST", `/conteos/${id}/quitar-ultima`, {}),
+    terminarConteoLibre: (id) => pedir("POST", `/conteos/${id}/terminar`, {}),
+    anularConteoLibre: (id) => pedir("POST", `/conteos/${id}/anular`, {}),
     cerrarLineaTraslado: (docEntry, lineNum) => pedir("POST", `/inventario/traslados/${docEntry}/lineas/${lineNum}/cerrar`, {}),
     conteoInicial: ({ buscar = "", pagina = 0 } = {}) => pedir("GET", `/inventario/pendientes/inicial?${new URLSearchParams({
       pagina: String(pagina), limit: "50", ...(buscar ? { buscar } : {}) })}`),

@@ -8,6 +8,8 @@ import { SERVIDOR_PRODUCCION, elegirServidor } from "../src/servidor.js";
 import { crearIngreso, datosIngresoValidos, leerClaveIngreso } from "../src/ingreso.js";
 import { PREFERENCIAS_INICIALES, crearPreferencias, normalizarPreferencias } from "../src/preferencias.js";
 import { guardarPdf, nombreSeguro, piePagina } from "../src/pdf.js";
+import { crearXlsx, datosHojaValidos, guardarExcel, nombreSeguroXlsx } from "../src/excel.js";
+import { inflateRawSync } from "node:zlib";
 
 const UI = path.resolve("ui");
 
@@ -152,4 +154,53 @@ test("pdf: pregunta dónde guardar, escribe el PDF de la ventana y lo abre; canc
     escribir: async () => { throw Object.assign(new Error("ocupado"), { code: "EBUSY" }); } });
   assert.deepEqual(ocupado, { ok: false, motivo: "ocupado" });
   assert.equal(abiertos.length, 1);
+});
+
+// Lee los archivos de un zip (lo justo para revisar el .xlsx que arma la app).
+function leerZip(buffer) {
+  const archivos = {};
+  let i = 0;
+  while (buffer.readUInt32LE(i) === 0x04034b50) {
+    const tamano = buffer.readUInt32LE(i + 18), largoNombre = buffer.readUInt16LE(i + 26), extra = buffer.readUInt16LE(i + 28);
+    const nombre = buffer.toString("utf8", i + 30, i + 30 + largoNombre);
+    const inicio = i + 30 + largoNombre + extra;
+    archivos[nombre] = inflateRawSync(buffer.subarray(inicio, inicio + tamano)).toString("utf8");
+    i = inicio + tamano;
+  }
+  return archivos;
+}
+
+test("excel: valida los datos, escapa el texto y arma un .xlsx con la hoja", () => {
+  assert.equal(nombreSeguroXlsx("Conteo-Estante-4-2026-11-04.xlsx"), "Conteo-Estante-4-2026-11-04.xlsx");
+  assert.equal(nombreSeguroXlsx("../../x/evil.exe"), "evil.exe.xlsx");
+  assert.equal(nombreSeguroXlsx(null), "Reporte.xlsx");
+  assert.equal(datosHojaValidos({ encabezados: [], filas: [] }), null);
+  assert.equal(datosHojaValidos({ encabezados: ["A"], filas: [["1", "2"]] }), null, "más celdas que encabezados");
+  assert.equal(datosHojaValidos({ encabezados: ["A"], filas: "x" }), null);
+  const hoja = datosHojaValidos({ titulo: "Conteo · Estante <4>", sub: "Isidro", encabezados: ["Código", "Producto", "Unidades"],
+    filas: [["P1", "Jabón & \u0007 \"neutro\"", 3], ["=CMD()", { a: 1 }, Infinity]], total: ["", "Total", 3] });
+  assert.deepEqual(hoja.filas[1], ["=CMD()", "[object Object]", "Infinity"], "lo que no es número finito queda como texto");
+  const archivos = leerZip(crearXlsx(hoja, "Conteo"));
+  assert.deepEqual(Object.keys(archivos).sort(), ["[Content_Types].xml", "_rels/.rels", "xl/_rels/workbook.xml.rels", "xl/styles.xml",
+    "xl/workbook.xml", "xl/worksheets/sheet1.xml"]);
+  const hojaXml = archivos["xl/worksheets/sheet1.xml"];
+  assert.match(hojaXml, /Conteo · Estante &lt;4&gt;/);
+  assert.match(hojaXml, /Jabón &amp;  &quot;neutro&quot;/, "sin caracteres de control");
+  assert.match(hojaXml, /<c r="C5"><v>3<\/v><\/c>/, "los números quedan como números");
+  assert.match(hojaXml, /<c r="A6" t="inlineStr"><is><t xml:space="preserve">=CMD\(\)<\/t>/, "una fórmula escrita queda como texto");
+  assert.match(hojaXml, /<row r="7"><c r="A7" t="inlineStr" s="1">/, "el total en negrita");
+  assert.match(archivos["xl/workbook.xml"], /<sheet name="Conteo"/);
+});
+
+test("excel: pregunta dónde guardar, escribe el archivo y lo abre; cancelar o datos inválidos no escriben", async () => {
+  const escritos = [], abiertos = [];
+  const comun = { carpeta: path.join("C:", "Documentos"), escribir: async (r, x) => escritos.push([r, x.subarray(0, 2).toString()]), abrir: async (r) => abiertos.push(r) };
+  const datos = { nombre: "Conteo-Estante-4", encabezados: ["Código"], filas: [["P1"]] };
+  const r = await guardarExcel({ ...comun, datos, elegirArchivo: async (s) => s });
+  assert.deepEqual(r, { ok: true, archivo: "Conteo-Estante-4.xlsx" });
+  assert.deepEqual(escritos, [[path.join("C:", "Documentos", "Conteo-Estante-4.xlsx"), "PK"]]);
+  assert.equal(abiertos.length, 1);
+  assert.deepEqual(await guardarExcel({ ...comun, datos, elegirArchivo: async () => null }), { ok: false, cancelado: true });
+  assert.deepEqual(await guardarExcel({ ...comun, datos: { filas: [] }, elegirArchivo: async (s) => s }), { ok: false, motivo: "datos" });
+  assert.equal(escritos.length, 1);
 });
