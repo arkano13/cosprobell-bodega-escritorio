@@ -1,5 +1,5 @@
 // Puente mínimo entre la pantalla y la app: preferencias del equipo, lista de operadores, ingreso con PIN,
-// impresión de las etiquetas de las cajas, reportes en PDF y la versión nueva lista para instalar.
+// impresión de las etiquetas de las cajas, reportes en PDF y en Excel, y la versión nueva lista para instalar.
 // La página no tiene acceso a Node ni a Electron, ni ve la clave de ingreso.
 const { contextBridge, ipcRenderer } = require("electron");
 
@@ -11,6 +11,8 @@ contextBridge.exposeInMainWorld("escritorio", {
   imprimir: () => ipcRenderer.invoke("imprimir"),
   // datos: { nombre, pie }. Guarda en PDF lo que la página dejó en su zona de impresión.
   guardarPdf: (datos) => ipcRenderer.invoke("reporte:pdf", datos),
+  // datos: { nombre, hoja, titulo, sub, encabezados, filas, total }. Guarda una planilla de Excel con esos datos.
+  guardarExcel: (datos) => ipcRenderer.invoke("reporte:excel", datos),
   actualizacionPendiente: () => ipcRenderer.invoke("actualizacion:pendiente"),
   alActualizacionLista: (avisar) => { ipcRenderer.on("actualizacion:lista", (_evento, datos) => avisar(datos)); },
   instalarActualizacion: () => ipcRenderer.invoke("actualizacion:instalar"),
